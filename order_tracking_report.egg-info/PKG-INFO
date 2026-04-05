@@ -1,0 +1,65 @@
+Metadata-Version: 2.4
+Name: order_tracking_report
+Version: 0.0.1
+Summary: Sales Order custom fields scripts reports
+Author: Local Team
+Author-email: Local Team <admin@example.com>
+Requires-Python: >=3.14
+Description-Content-Type: text/markdown
+Dynamic: author
+
+### Order Tracking Report
+
+This app packages Sales Order customizations so they can be moved to another server.
+
+Included fixtures:
+
+- Custom Fields (`Sales Order`) including `custom_detail_status` and `custom_po_item`
+- Client Scripts (`Sales Order`)
+- Property Setters (`Sales Order`)
+- Server Scripts:
+  - `Sales Order Detail Status`
+  - `create_po_from_sales_order_po_tab`
+- Custom Reports (`Sales Order`, non-standard only)
+
+### Installation
+
+1. Copy/push this app to the target server bench `apps` path.
+2. Install the app:
+
+```bash
+cd $PATH_TO_YOUR_BENCH
+bench get-app $URL_OF_THIS_REPO
+bench install-app order_tracking_report
+bench --site $SITE_NAME migrate
+bench clear-cache
+```
+
+### Update Fixtures (source server)
+
+When you add more Sales Order customizations, re-export fixtures:
+
+```bash
+cd $PATH_TO_YOUR_BENCH
+bench --site $SITE_NAME export-fixtures --app order_tracking_report
+```
+
+### Contributing
+
+This app uses `pre-commit` for code formatting and linting. Please [install pre-commit](https://pre-commit.com/#installation) and enable it for this repository:
+
+```bash
+cd apps/order_tracking_report
+pre-commit install
+```
+
+Pre-commit is configured to use the following tools for checking and formatting your code:
+
+- ruff
+- eslint
+- prettier
+- pyupgrade
+
+### License
+
+mit
