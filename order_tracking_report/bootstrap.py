@@ -2,8 +2,33 @@ import frappe
 
 
 def ensure_item_po_setup():
+    ensure_wastage_doctype()
     ensure_item_po_doctype()
     ensure_item_po_fields()
+
+
+def ensure_wastage_doctype():
+    if frappe.db.exists("DocType", "Wastage"):
+        return
+
+    doc = frappe.get_doc(
+        {
+            "doctype": "DocType",
+            "name": "Wastage",
+            "module": "Order Tracking Report",
+            "custom": 1,
+            "istable": 1,
+            "editable_grid": 1,
+            "engine": "InnoDB",
+            "fields": [
+                {"fieldname": "item", "label": "Item", "fieldtype": "Link", "options": "Item"},
+                {"fieldname": "qty", "label": "Qty", "fieldtype": "Float"},
+                {"fieldname": "remarks", "label": "Remarks", "fieldtype": "Data"},
+            ],
+            "permissions": [],
+        }
+    )
+    doc.insert(ignore_permissions=True)
 
 
 def ensure_item_po_doctype():
