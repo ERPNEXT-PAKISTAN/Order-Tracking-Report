@@ -11,30 +11,8 @@ fixtures = [
 		"filters": [["dt", "=", "Sales Order"]],
 	},
 	{
-		"dt": "Client Script",
-		"filters": [["dt", "=", "Sales Order"]],
-	},
-	{
 		"dt": "Property Setter",
 		"filters": [["doc_type", "=", "Sales Order"]],
-	},
-	{
-		"dt": "Report",
-		"filters": [
-			["ref_doctype", "=", "Sales Order"],
-			["is_standard", "=", "No"],
-		],
-	},
-	{
-		"dt": "Server Script",
-		"filters": [[
-			"name",
-			"in",
-			[
-				"Sales Order Detail Status",
-				"create_po_from_sales_order_po_tab",
-			],
-		]],
 	},
 	{
 		"dt": "Print Format",
@@ -80,7 +58,12 @@ fixtures = [
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {"Sales Order": "public/js/sales_order.js"}
+
+after_migrate = [
+	"order_tracking_report.bootstrap.ensure_item_po_setup",
+	"order_tracking_report.cleanup.remove_legacy_ui_scripts",
+]
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -176,6 +159,13 @@ fixtures = [
 # 		"on_trash": "method"
 # 	}
 # }
+doc_events = {
+	"Purchase Order": {
+		"on_update": "order_tracking_report.po_sync.sync_item_po_status_for_purchase_order",
+		"on_submit": "order_tracking_report.po_sync.sync_item_po_status_for_purchase_order",
+		"on_cancel": "order_tracking_report.po_sync.sync_item_po_status_for_purchase_order",
+	}
+}
 
 # Scheduled Tasks
 # ---------------

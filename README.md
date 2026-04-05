@@ -2,15 +2,26 @@
 
 This app packages Sales Order customizations so they can be moved to another server.
 
-Included fixtures:
+Backend design:
 
 - Custom Fields (`Sales Order`) including `custom_detail_status` and `custom_po_item`
-- Client Scripts (`Sales Order`)
+- Client logic moved to app file: `order_tracking_report/public/js/sales_order.js`
 - Property Setters (`Sales Order`)
-- Server Scripts:
-  - `Sales Order Detail Status`
-  - `create_po_from_sales_order_po_tab`
-- Custom Reports (`Sales Order`, non-standard only)
+- API logic moved to app file: `order_tracking_report/api.py`
+- Detail status backend engine: `order_tracking_report/so_detail_status_backend.py`
+- Legacy `Client Script` and `Server Script` records are auto-removed by:
+  - `order_tracking_report.cleanup.remove_legacy_ui_scripts` (hook: `after_migrate`)
+- Purchase Order -> Item PO status sync is now app `doc_events`:
+  - `order_tracking_report.po_sync.sync_item_po_status_for_purchase_order`
+  - old `Status update Creat PO from SO_po_tab*` server scripts are removed on migrate
+- Child table dependency is auto-ensured by:
+  - `order_tracking_report.bootstrap.ensure_item_po_setup` (creates `Item PO` Doctype/fields if missing)
+
+Included fixtures:
+
+- `Custom Field`
+- `Property Setter`
+- `Print Format`
 
 ### Installation
 
@@ -24,6 +35,10 @@ bench --site <site_name> migrate
 bench --site <site_name> clear-cache
 bench restart
 ```
+
+If your server already has old UI scripts/fields, install is still safe:
+- Existing fields with same name are updated by fixtures.
+- Legacy app script records are removed on migrate (exact known names only).
 
 ### Update on Server (already installed)
 
@@ -64,6 +79,31 @@ git push -u origin main
 ```bash
 cd /home/frappe/frappe-bench-v16
 bench --site <site_name> export-fixtures --app order_tracking_report
+```
+
+### Folder Schema
+
+```text
+apps/order_tracking_report/
+  README.md
+  DEPLOY_TO_OTHER_SERVER.md
+  order_tracking_report/
+    hooks.py
+    api.py
+    bootstrap.py
+    so_detail_status_backend.py
+    cleanup.py
+    public/js/sales_order.js
+    fixtures/
+      custom_field.json
+      property_setter.json
+      print_format.json
+    order_tracking_report/
+      report/
+        purchase_order_updated_status/
+          purchase_order_updated_status.py
+          purchase_order_updated_status.js
+          purchase_order_updated_status.json
 ```
 
 ### Contributing
