@@ -30,11 +30,11 @@ Included fixtures:
 Install on new server/site:
 
 ```bash
-cd /home/frappe/frappe-bench-v16
+cd /home/frappe/frappe-bench
 bench get-app --branch main order_tracking_report https://github.com/ERPNEXT-PAKISTAN/Order-Tracking-Report.git
-bench --site <site_name> install-app order_tracking_report
-bench --site <site_name> migrate
-bench --site <site_name> clear-cache
+bench --site site1.local install-app order_tracking_report
+bench --site site1.local migrate
+bench --site site1.local clear-cache
 bench restart
 ```
 
@@ -59,11 +59,11 @@ git checkout -B main origin/main
 Regular update command:
 
 ```bash
-cd <bench_path>/apps/order_tracking_report
+cd /home/frappe/frappe-bench/apps/order_tracking_report
 git pull origin main
-cd <bench_path>
-bench --site <site_name> migrate
-bench --site <site_name> clear-cache
+cd /home/frappe/frappe-bench
+bench --site site1.local migrate
+bench --site site1.local clear-cache
 bench restart
 ```
 
@@ -71,83 +71,49 @@ Important:
 - Use the same `<bench_path>` where this app is actually installed.
 - Example: if app is in `/home/frappe/frappe-bench/apps/order_tracking_report`, then use `/home/frappe/frappe-bench` (not `/home/frappe/frappe-bench-v16`).
 
-### GitHub Upload Commands
+### Folder Schema (3 Sections)
 
-From this app folder:
-
-```bash
-cd /home/frappe/frappe-bench-v16/apps/order_tracking_report
-echo "# Order-Tracking-Report" >> README.md
-git init
-git add README.md
-git commit -m "first commit"
-git branch -M main
-git remote add origin https://github.com/ERPNEXT-PAKISTAN/Order-Tracking-Report.git
-git push -u origin main
-```
-
-If remote already exists:
-
-```bash
-git remote set-url origin https://github.com/ERPNEXT-PAKISTAN/Order-Tracking-Report.git
-git branch -M main
-git push -u origin main
-```
-
-### Export Fixtures (when customizations change)
-
-```bash
-cd /home/frappe/frappe-bench-v16
-bench --site <site_name> export-fixtures --app order_tracking_report
-```
-
-### Folder Schema
+1. Core Backend
 
 ```text
 apps/order_tracking_report/
-  README.md
-  DEPLOY_TO_OTHER_SERVER.md
   order_tracking_report/
     hooks.py
     api.py
     bootstrap.py
     so_detail_status_backend.py
     cleanup.py
-    public/js/sales_order.js
-    public/js/data_entry/
+```
+
+2. Frontend JS (inside app)
+
+```text
+apps/order_tracking_report/
+  order_tracking_report/public/js/
+    sales_order.js
+    data_entry/
       sales_order_data_entry.js
       sales_invoice_data_entry.js
       purchase_order_data_entry.js
       purchase_receipt_data_entry.js
       purchase_invoice_data_entry.js
       stock_entry_data_entry.js
-    fixtures/
-      custom_field.json
-      property_setter.json
-      print_format.json
-    order_tracking_report/
-      report/
-        purchase_order_updated_status/
-          purchase_order_updated_status.py
-          purchase_order_updated_status.js
-          purchase_order_updated_status.json
 ```
 
-### Contributing
+3. Fixtures and Reports
 
-This app uses `pre-commit` for code formatting and linting. Please [install pre-commit](https://pre-commit.com/#installation) and enable it for this repository:
-
-```bash
-cd apps/order_tracking_report
-pre-commit install
+```text
+apps/order_tracking_report/
+  order_tracking_report/fixtures/
+    custom_field.json
+    property_setter.json
+    print_format.json
+  order_tracking_report/order_tracking_report/report/
+    purchase_order_updated_status/
+      purchase_order_updated_status.py
+      purchase_order_updated_status.js
+      purchase_order_updated_status.json
 ```
-
-Pre-commit is configured to use the following tools for checking and formatting your code:
-
-- ruff
-- eslint
-- prettier
-- pyupgrade
 
 ### License
 
