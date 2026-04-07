@@ -59,6 +59,17 @@ bench --site site1.local clear-cache
 bench restart
 ```
 
+Multi-site example (`ah.frappe.my`):
+
+```bash
+cd /home/frappe/frappe-bench/apps/order_tracking_report
+git pull origin main
+cd /home/frappe/frappe-bench
+bench --site ah.frappe.my migrate
+bench --site ah.frappe.my clear-cache
+bench restart
+```
+
 Important:
 - Use the bench path where this app is installed.
 - If your app path is `/home/frappe/frappe-bench/apps/order_tracking_report`, run commands from `/home/frappe/frappe-bench`.
@@ -112,3 +123,24 @@ apps/order_tracking_report/
 - Fixtures are already exported in app code, so `migrate` applies customizations.
 - `after_migrate` hooks ensure required child tables (like `Item PO` and `Wastage`) and remove legacy UI scripts (`Client Script` / `Server Script`) that were moved to backend app code.
 - Recent fix included: PR Qty in `Material Shortage & Purchase Suggestion` now uses submitted `Purchase Receipt Item` quantities for partial receipts.
+
+## 6) Add Pictures in MD
+
+Save images in app folder:
+
+```bash
+cd /home/frappe/frappe-bench/apps/order_tracking_report
+mkdir -p docs/images
+```
+
+Then use in markdown:
+
+```md
+![Sales Order Dashboard](docs/images/sales-order-dashboard.png)
+```
+
+Or HTML size control:
+
+```html
+<img src="docs/images/sales-order-dashboard.png" alt="Sales Order Dashboard" width="1000">
+```

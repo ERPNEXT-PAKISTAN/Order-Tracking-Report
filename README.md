@@ -49,7 +49,7 @@ If `git pull origin main` fails with:
 then app folder is not linked to remote yet. Run one-time setup:
 
 ```bash
-cd <bench_path>/apps/order_tracking_report
+cd /home/frappe/frappe-bench/apps/order_tracking_report
 git init
 git remote add origin https://github.com/ERPNEXT-PAKISTAN/Order-Tracking-Report.git
 git fetch origin
@@ -68,8 +68,28 @@ bench restart
 ```
 
 Important:
-- Use the same `<bench_path>` where this app is actually installed.
-- Example: if app is in `/home/frappe/frappe-bench/apps/order_tracking_report`, then use `/home/frappe/frappe-bench` (not `/home/frappe/frappe-bench-v16`).
+- Use `/home/frappe/frappe-bench` for all commands on this setup.
+
+### Multi-Site Example (`ah.frappe.my`)
+
+```bash
+cd /home/frappe/frappe-bench/apps/order_tracking_report
+git pull origin main
+cd /home/frappe/frappe-bench
+bench --site ah.frappe.my migrate
+bench --site ah.frappe.my clear-cache
+bench restart
+```
+
+If this app folder is not linked to GitHub yet:
+
+```bash
+cd /home/frappe/frappe-bench/apps/order_tracking_report
+git init
+git remote add origin https://github.com/ERPNEXT-PAKISTAN/Order-Tracking-Report.git
+git fetch origin
+git checkout -B main origin/main
+```
 
 ### Folder Schema (3 Sections)
 
@@ -113,6 +133,26 @@ apps/order_tracking_report/
       purchase_order_updated_status.py
       purchase_order_updated_status.js
       purchase_order_updated_status.json
+```
+
+### Add Images in Markdown
+
+Store screenshots in:
+
+```text
+docs/images/
+```
+
+Example markdown syntax:
+
+```md
+![Dashboard](docs/images/dashboard.png)
+```
+
+With custom size (HTML):
+
+```html
+<img src="docs/images/dashboard.png" alt="Dashboard" width="900">
 ```
 
 ### License
