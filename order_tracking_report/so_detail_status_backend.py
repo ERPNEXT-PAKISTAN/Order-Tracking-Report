@@ -938,6 +938,11 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                     "item",
                     "supplier",
                     "qty",
+                    "custom_po_qty",
+                    "custom_base_qty",
+                    "custom_extra_qty",
+                    "custom_wastage_percentage",
+                    "custom_wastage_qty",
                     "purchase_order",
                     "posting_status",
                     "po_status",
@@ -1013,7 +1018,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
             supplier = r.get("supplier") or ""
             po_name = r.get("purchase_order") or ""
     
-            row_ordered = to_float(r.get("qty"))
+            row_ordered = to_float(r.get("custom_po_qty")) or to_float(r.get("qty"))
             row_received = 0
     
             if po_name and item_code:
@@ -1118,7 +1123,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                     "parenttype": "Sales Order",
                     "parentfield": "custom_po_item",
                 },
-                fields=["name", "item", "qty", "purchase_order"],
+                fields=["name", "item", "qty", "custom_po_qty", "purchase_order"],
                 order_by="idx asc",
             )
         except Exception:
@@ -1153,7 +1158,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
             row_name = r.get("name")
             po_name = r.get("purchase_order") or ""
             item_code = r.get("item") or ""
-            row_qty = to_float(r.get("qty"))
+            row_qty = to_float(r.get("custom_po_qty")) or to_float(r.get("qty"))
     
             if not po_name:
                 frappe.db.set_value("Item PO", row_name, "posting_status", "", update_modified=False)
@@ -1204,7 +1209,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                     "parenttype": "Sales Order",
                     "parentfield": "custom_po_item",
                 },
-                fields=["item", "supplier", "qty", "purchase_order"],
+                fields=["item", "supplier", "qty", "custom_po_qty", "purchase_order"],
                 order_by="idx asc",
             )
         except Exception:
@@ -1249,7 +1254,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
             group_name = item_group_map.get(item) or "Uncategorized"
             supplier = (r.get("supplier") or "").strip()
             po_name = (r.get("purchase_order") or "").strip()
-            ordered_qty = to_float(r.get("qty"))
+            ordered_qty = to_float(r.get("custom_po_qty")) or to_float(r.get("qty"))
             received_qty = 0
             status = "Pending"
     
@@ -1433,6 +1438,95 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
             for x in item_info:
                 item_group_map[x.get("name")] = x.get("item_group") or "Uncategorized"
     
+        wastage_pct_map = {}
+        wastage_pct_item_map = {}
+        wastage_mode = "Individual"
+        global_manual_pct = 0
+        if so:
+            try:
+                so_w = frappe.db.get_value(
+                    "Sales Order",
+                    so,
+                    ["custom_wastage_mode", "custom_manual_wastage_percent"],
+                    as_dict=True,
+                ) or {}
+                wastage_mode = (so_w.get("custom_wastage_mode") or "Individual").strip()
+                global_manual_pct = to_float(so_w.get("custom_manual_wastage_percent"))
+                if global_manual_pct < 0:
+                    global_manual_pct = 0
+            except Exception:
+                pass
+
+        def _norm_key(value):
+            return str(value or "").strip().lower()
+
+        if so and frappe.db.exists("DocType", "Wastage"):
+            try:
+                wastage_columns = set()
+                try:
+                    wastage_columns = set(frappe.db.get_table_columns("Wastage") or [])
+                except Exception:
+                    wastage_columns = set()
+
+                # Some servers do not have `item` on Wastage (older schema),
+                # so fetch only fields that actually exist.
+                fields = ["item_group", "wastage", "manual", "po", "source"]
+                if "item" in wastage_columns:
+                    fields.append("item")
+
+                w_rows = frappe.get_all(
+                    "Wastage",
+                    filters={
+                        "parent": so,
+                        "parenttype": "Sales Order",
+                        "parentfield": "custom_wastages",
+                    },
+                    fields=fields,
+                )
+            except Exception:
+                w_rows = []
+
+            mode_key = str(wastage_mode or "").strip().lower()
+            for w in w_rows:
+                group_key = _norm_key(w.get("item_group"))
+                item_key = _norm_key(w.get("item"))
+                if not group_key and not item_key:
+                    continue
+
+                row_source = str(w.get("source") or "").strip().lower()
+                source_value = w.get("wastage")
+
+                if mode_key == "individual" or not mode_key:
+                    if row_source == "manual":
+                        source_value = w.get("manual")
+                        if source_value in [None, ""]:
+                            source_value = w.get("wastage")
+                    elif row_source == "po":
+                        source_value = w.get("po")
+                        if source_value in [None, ""]:
+                            source_value = w.get("wastage")
+                    else:
+                        source_value = w.get("wastage")
+                elif mode_key == "manual":
+                    source_value = w.get("manual")
+                    if source_value in [None, ""]:
+                        source_value = w.get("wastage")
+                elif mode_key == "po":
+                    source_value = w.get("po")
+                    if source_value in [None, ""]:
+                        source_value = w.get("wastage")
+                else:
+                    source_value = w.get("wastage")
+
+                raw = str(source_value or "").replace("%", "").strip()
+                pct = to_float(raw)
+                if pct < 0:
+                    pct = 0
+                if group_key:
+                    wastage_pct_map[group_key] = pct
+                if item_key:
+                    wastage_pct_item_map[item_key] = pct
+
         grouped = {}
         for r in rows:
             item_code = r.get("item_code")
@@ -1450,6 +1544,8 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                     "po_qty": 0,
                     "pr_qty": 0,
                     "pending_po_qty": 0,
+                    "wastage_pct": 0,
+                    "wastage_qty": 0,
                 }
     
             grouped[key]["qty_per_bom"] = to_float(grouped[key].get("qty_per_bom")) + to_float(r.get("qty_per_bom"))
@@ -1467,6 +1563,20 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
             grouped[key]["po_qty"] = po_qty
             grouped[key]["pr_qty"] = pr_qty
             grouped[key]["pending_po_qty"] = max(po_qty - pr_qty, 0)
+            if str(wastage_mode or "").strip().lower() == "global manual %":
+                grouped[key]["wastage_pct"] = global_manual_pct
+            else:
+                pct_from_group = wastage_pct_map.get(_norm_key(group_name))
+                pct_from_item = wastage_pct_item_map.get(_norm_key(item_code))
+                if pct_from_group is None and pct_from_item is None:
+                    grouped[key]["wastage_pct"] = 0
+                elif pct_from_group is None:
+                    grouped[key]["wastage_pct"] = to_float(pct_from_item)
+                else:
+                    grouped[key]["wastage_pct"] = to_float(pct_from_group)
+            grouped[key]["wastage_qty"] = round(
+                to_float(grouped[key].get("required_qty")) * to_float(grouped[key]["wastage_pct"]) / 100.0, 4
+            )
     
         out = list(grouped.values())
         out.sort(key=lambda x: ((x.get("item_group") or ""), (x.get("item_code") or "")))
@@ -1483,13 +1593,19 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                     "parenttype": "Sales Order",
                     "parentfield": "custom_po_item",
                 },
-                fields=["item", "supplier", "qty", "purchase_order"],
+                fields=["item", "supplier", "qty", "custom_po_qty", "purchase_order"],
                 order_by="idx asc",
             )
         except Exception:
             item_po = []
     
         po_names = uniq_list([r.get("purchase_order") for r in item_po if r.get("purchase_order")])
+        supplier_by_po_from_item_po = {}
+        for r in item_po:
+            po_name = (r.get("purchase_order") or "").strip()
+            supplier = (r.get("supplier") or "").strip()
+            if po_name and supplier and not supplier_by_po_from_item_po.get(po_name):
+                supplier_by_po_from_item_po[po_name] = supplier
     
         # include POs directly linked by sales_order in PO Item as fallback
         po_fallback = safe_sql(
@@ -1555,9 +1671,13 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
     
         # gather not-created bucket from Item PO
         not_created_qty = 0
+        missing_supplier = []
         for r in item_po:
             if not r.get("purchase_order"):
-                not_created_qty = not_created_qty + to_float(r.get("qty"))
+                not_created_qty = not_created_qty + (to_float(r.get("custom_po_qty")) or to_float(r.get("qty")))
+                s = (r.get("supplier") or "").strip()
+                if s and s not in missing_supplier:
+                    missing_supplier.append(s)
     
         out = []
         for po_name in po_names:
@@ -1599,7 +1719,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
     
             out.append({
                 "purchase_order": po_name,
-                "supplier": meta.get("supplier") or "",
+                "supplier": meta.get("supplier") or supplier_by_po_from_item_po.get(po_name) or "",
                 "po_status": meta.get("status") or "Draft",
                 "ordered_qty": ordered_qty,
                 "received_qty": received_qty,
@@ -1620,7 +1740,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
         if not_created_qty > 0:
             out.append({
                 "purchase_order": "",
-                "supplier": "",
+                "supplier": ", ".join(missing_supplier),
                 "po_status": "Not Created",
                 "ordered_qty": not_created_qty,
                 "received_qty": 0,

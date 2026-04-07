@@ -5,7 +5,9 @@ This app packages Sales Order customizations so they can be moved to another ser
 Backend design:
 
 - Custom Fields (`Sales Order`) including `custom_detail_status` and `custom_po_item`
-- Client logic moved to app file: `order_tracking_report/public/js/sales_order.js`
+- Client logic moved to app files:
+  - `order_tracking_report/public/js/sales_order.js` (detail status + SO actions)
+  - `order_tracking_report/public/js/data_entry/*.js` (Data Entry on Sales Order, Sales Invoice, Purchase Order, Purchase Receipt, Purchase Invoice, Stock Entry)
 - Property Setters (`Sales Order`)
 - API logic moved to app file: `order_tracking_report/api.py`
 - Detail status backend engine: `order_tracking_report/so_detail_status_backend.py`
@@ -42,14 +44,32 @@ If your server already has old UI scripts/fields, install is still safe:
 
 ### Update on Server (already installed)
 
+If `git pull origin main` fails with:
+`fatal: 'origin' does not appear to be a git repository`
+then app folder is not linked to remote yet. Run one-time setup:
+
 ```bash
-cd /home/frappe/frappe-bench-v16/apps/order_tracking_report
+cd <bench_path>/apps/order_tracking_report
+git init
+git remote add origin https://github.com/ERPNEXT-PAKISTAN/Order-Tracking-Report.git
+git fetch origin
+git checkout -B main origin/main
+```
+
+Regular update command:
+
+```bash
+cd <bench_path>/apps/order_tracking_report
 git pull origin main
-cd /home/frappe/frappe-bench-v16
+cd <bench_path>
 bench --site <site_name> migrate
 bench --site <site_name> clear-cache
 bench restart
 ```
+
+Important:
+- Use the same `<bench_path>` where this app is actually installed.
+- Example: if app is in `/home/frappe/frappe-bench/apps/order_tracking_report`, then use `/home/frappe/frappe-bench` (not `/home/frappe/frappe-bench-v16`).
 
 ### GitHub Upload Commands
 
@@ -94,6 +114,13 @@ apps/order_tracking_report/
     so_detail_status_backend.py
     cleanup.py
     public/js/sales_order.js
+    public/js/data_entry/
+      sales_order_data_entry.js
+      sales_invoice_data_entry.js
+      purchase_order_data_entry.js
+      purchase_receipt_data_entry.js
+      purchase_invoice_data_entry.js
+      stock_entry_data_entry.js
     fixtures/
       custom_field.json
       property_setter.json

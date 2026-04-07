@@ -178,6 +178,14 @@ def create_po_from_sales_order_po_tab(source_name=None, row_names=None):
         po.project = sales_order.project
         po.custom_remarks = remarks
         po.custom_so_number = sales_order.name
+        default_set_warehouse = ""
+        for _r in supplier_rows:
+            wh = (_r.get("warehouse") or "").strip()
+            if wh:
+                default_set_warehouse = wh
+                break
+        if default_set_warehouse:
+            po.set_warehouse = default_set_warehouse
 
         for row in supplier_rows:
             item = item_map.get(row.item)
@@ -200,7 +208,13 @@ def create_po_from_sales_order_po_tab(source_name=None, row_names=None):
                     "item_name": item.get("item_name") or row.item,
                     "description": description_value,
                     "custom_comments": row.get("comments") or "",
+                    "custom_base_qty": frappe.utils.flt(row.get("custom_base_qty") or row.qty or 0),
+                    "custom_wastage_percentage": frappe.utils.flt(row.get("custom_wastage_percentage") or 0),
+                    "custom_wastage_qty": frappe.utils.flt(row.get("custom_wastage_qty") or 0),
+                    "custom_extra_qty": frappe.utils.flt(row.get("custom_extra_qty") or 0),
+                    "custom_po_qty": frappe.utils.flt(row.get("custom_po_qty") or row.qty or 0),
                     "qty": row.qty,
+                    "warehouse": (row.get("warehouse") or "").strip(),
                     "schedule_date": effective_schedule_date,
                     "uom": purchase_uom,
                     "stock_uom": stock_uom,
@@ -230,3 +244,36 @@ def create_po_from_sales_order_po_tab(source_name=None, row_names=None):
         created.append({"name": po.name, "supplier": supplier})
 
     return created
+
+
+@frappe.whitelist()
+def create_po_from_material_shortage_line(source_name=None, item_code=None, qty=None, supplier=None, description=None):
+    if not source_name:
+        frappe.throw("Sales Order is required")
+    if not item_code:
+        frappe.throw("Item is required")
+    if frappe.utils.flt(qty) <= 0:
+        frappe.throw("Qty must be greater than zero")
+    if not supplier:
+        frappe.throw("Supplier is required")
+
+    so = frappe.get_doc("Sales Order", source_name)
+    row = so.append("custom_po_item", {})
+    row.item = item_code
+    row.qty = frappe.utils.flt(qty)
+    row.custom_base_qty = frappe.utils.flt(qty)
+    row.custom_po_qty = frappe.utils.flt(qty)
+    row.custom_wastage_percentage = 0
+    row.custom_wastage_qty = 0
+    row.custom_extra_qty = 0
+    row.supplier = supplier
+    row.warehouse = ""
+    row.descriptions = (description or "").strip()
+    row.select_for_po = 1
+    so.save(ignore_permissions=True)
+
+    created = create_po_from_sales_order_po_tab(source_name=source_name, row_names=[row.name])
+    return {
+        "row_name": row.name,
+        "created": created,
+    }

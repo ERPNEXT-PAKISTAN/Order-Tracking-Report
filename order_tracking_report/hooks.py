@@ -16,7 +16,7 @@ fixtures = [
 	},
 	{
 		"dt": "Print Format",
-		"filters": [["name", "=", "Sales Order Contract"]],
+		"filters": [["name", "in", ["Sales Order Contract", "Sales Order Contract with Comment"]]],
 	},
 ]
 
@@ -41,7 +41,9 @@ fixtures = [
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/order_tracking_report/css/order_tracking_report.css"
-# app_include_js = "/assets/order_tracking_report/js/order_tracking_report.js"
+app_include_js = [
+	"/assets/order_tracking_report/js/data_entry/sales_order_data_entry.js",
+]
 
 # include js, css files in header of web template
 # web_include_css = "/assets/order_tracking_report/css/order_tracking_report.css"
@@ -58,11 +60,19 @@ fixtures = [
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-doctype_js = {"Sales Order": "public/js/sales_order.js"}
+doctype_js = {
+	"Sales Order": "public/js/sales_order.js",
+	"Purchase Order": "public/js/data_entry/purchase_order_data_entry.js",
+	"Purchase Receipt": "public/js/data_entry/purchase_receipt_data_entry.js",
+	"Purchase Invoice": "public/js/data_entry/purchase_invoice_data_entry.js",
+	"Sales Invoice": "public/js/data_entry/sales_invoice_data_entry.js",
+	"Stock Entry": "public/js/data_entry/stock_entry_data_entry.js",
+}
 
 after_migrate = [
 	"order_tracking_report.bootstrap.ensure_item_po_setup",
 	"order_tracking_report.cleanup.remove_legacy_ui_scripts",
+	"order_tracking_report.cleanup.normalize_purchase_receipt_titles",
 ]
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
@@ -164,7 +174,10 @@ doc_events = {
 		"on_update": "order_tracking_report.po_sync.sync_item_po_status_for_purchase_order",
 		"on_submit": "order_tracking_report.po_sync.sync_item_po_status_for_purchase_order",
 		"on_cancel": "order_tracking_report.po_sync.sync_item_po_status_for_purchase_order",
-	}
+	},
+	"Purchase Receipt": {
+		"validate": "order_tracking_report.cleanup.ensure_purchase_receipt_title",
+	},
 }
 
 # Scheduled Tasks

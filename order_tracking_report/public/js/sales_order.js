@@ -30,6 +30,7 @@ frappe.ui.form.on("Sales Order", {
         bindToggles(f.$wrapper);
         bindPopupLinks(f.$wrapper);
         bindSectionToggles(f.$wrapper);
+        bindMaterialShortageCreatePo(f.$wrapper, frm);
       },
       error: () => {
         f.$wrapper.html(`<div class="text-danger">Detail status dashboard is not available.</div>`);
@@ -106,7 +107,7 @@ return `
   .so-toggle .l{display:flex;align-items:center;gap:8px;font-weight:900;color:#0f172a;}
   .so-toggle .r{font-size:12px;color:#64748b;}
   .so-panel{margin:0 0 12px 0;padding-left:8px;}
-  .so-table thead th{color:#fff !important;background:linear-gradient(90deg,#1d4ed8,#06b6d4) !important;border-color:#1e40af !important;font-weight:900 !important;font-size:12px !important;}
+  .so-table thead th{color:#1d4ed8 !important;background:#eef2ff !important;border-color:#bfdbfe !important;font-weight:900 !important;font-size:12px !important;text-align:center !important;vertical-align:middle !important;}
   .so-table td{font-size:12px;vertical-align:top;}
   .muted{color:#64748b;}
   .so-progress{height:12px;border-radius:999px;background:#e2e8f0;overflow:hidden;}
@@ -130,6 +131,9 @@ return `
   .so-popup-box{background:rgba(255,255,255,.15);border-radius:12px;padding:8px 10px;}
   .so-popup-box .k{font-size:11px;opacity:.9;}
   .so-popup-box .v{font-size:14px;font-weight:900;}
+  .so-summary-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
+  .so-summary-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:#eef2ff;color:#1e293b;font-size:11px;font-weight:800;white-space:nowrap;}
+  .so-summary-chip.kpi{background:#f1f5f9;}
 </style>`;
 }
 
@@ -148,6 +152,27 @@ function bindPopupLinks($wrap){
     const doctype = $(this).attr("data-doctype");
     const docname = $(this).attr("data-docname");
     openDocItems(doctype, docname);
+  });
+}
+
+function bindMaterialShortageCreatePo($wrap, frm){
+  $wrap.find("[data-ms-create-po='1']").off("click").on("click", function(e){
+    e.preventDefault();
+    const item = ($(this).attr("data-item") || "").trim();
+    const defaultQty = flt($(this).attr("data-qty") || 0);
+    const description = ($(this).attr("data-description") || "").trim();
+    if (!item || defaultQty <= 0) {
+      frappe.msgprint(__("Invalid row for Create PO."));
+      return;
+    }
+
+    // Route this action through the same PO Tools -> PO Item Data Entry window.
+    open_po_item_data_entry(frm, {
+      item_code: item,
+      qty: defaultQty,
+      descriptions: description || item,
+      select_for_po: 1,
+    });
   });
 }
 
@@ -730,12 +755,12 @@ function poAnalyticsOverviewCard(overview){
   const o = overview || {};
   return `
     <div class="so-grid-3" style="grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;">
-      <div class="so-mini-card"><div class="so-mini-title">ORDERED QTY</div><div class="so-mini-val">${flt(o.ordered_qty || 0)}</div></div>
-      <div class="so-mini-card"><div class="so-mini-title">RECEIVED QTY</div><div class="so-mini-val">${flt(o.received_qty || 0)}</div></div>
-      <div class="so-mini-card"><div class="so-mini-title">PENDING QTY</div><div class="so-mini-val">${flt(o.pending_qty || 0)}</div></div>
+      <div class="so-mini-card"><div class="so-mini-title">ORDERED QTY</div><div class="so-mini-val">${_n0(o.ordered_qty || 0)}</div></div>
+      <div class="so-mini-card"><div class="so-mini-title">RECEIVED QTY</div><div class="so-mini-val">${_n0(o.received_qty || 0)}</div></div>
+      <div class="so-mini-card"><div class="so-mini-title">PENDING QTY</div><div class="so-mini-val">${_n0(o.pending_qty || 0)}</div></div>
       <div class="so-mini-card"><div class="so-mini-title">RECEIVED %</div><div class="so-mini-val">${esc(o.received_pct || 0)}%</div></div>
       <div class="so-mini-card"><div class="so-mini-title">PENDING %</div><div class="so-mini-val">${esc(o.pending_pct || 0)}%</div></div>
-      <div class="so-mini-card"><div class="so-mini-title">PO CREATED / PENDING</div><div class="so-mini-val">${esc(o.po_created_rows || 0)} / ${esc(o.po_pending_rows || 0)}</div></div>
+      <div class="so-mini-card"><div class="so-mini-title">PO CREATED / PENDING</div><div class="so-mini-val">${_n0(o.po_created_rows || 0)} / ${_n0(o.po_pending_rows || 0)}</div></div>
     </div>
   `;
 }
@@ -1663,9 +1688,288 @@ function validate_rows_before_create(rows) {
   return errors;
 }
 
+function open_po_item_data_entry(frm, prefill) {
+  if (frm.doc.docstatus === 2) {
+    frappe.msgprint(__("Cancelled Sales Order is not allowed."));
+    return;
+  }
+
+  let items_data = [];
+  let item_map = {};
+  let last_item_code = "";
+  const toNum = (v) => {
+    if (v === null || v === undefined || v === "") return 0;
+    if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+    const s = String(v).replace(/,/g, "").trim();
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const toInt = (v) => (cint(v) ? 1 : 0);
+  const stripHtml = (v) => {
+    const s = String(v || "");
+    return s.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  };
+
+  const dialog = new frappe.ui.Dialog({
+    title: __("PO Item Data Entry"),
+    size: "extra-large",
+    fields: [
+      { fieldname: "header_html", fieldtype: "HTML" },
+      { fieldname: "meta_html", fieldtype: "HTML" },
+      { fieldtype: "Section Break", label: __("Item Filters") },
+      { label: __("Supplier"), fieldname: "supplier", fieldtype: "Link", options: "Supplier", reqd: 1 },
+      { fieldtype: "Column Break" },
+      { label: __("Item Group"), fieldname: "item_group", fieldtype: "Link", options: "Item Group" },
+      { fieldtype: "Section Break", label: __("Quick Add") },
+      { label: __("Item"), fieldname: "item_code", fieldtype: "Link", options: "Item", reqd: 1 },
+      { fieldtype: "Column Break" },
+      { label: __("Qty"), fieldname: "qty", fieldtype: "Float", default: 1, reqd: 1, precision: 0 },
+      { fieldtype: "Column Break" },
+      { label: __("Select for PO"), fieldname: "select_for_po", fieldtype: "Check", default: 1 },
+      { fieldtype: "Column Break" },
+      { label: __("Description"), fieldname: "descriptions", fieldtype: "Data" },
+      { fieldtype: "Column Break" },
+      { label: __("Comments"), fieldname: "comments", fieldtype: "Data" },
+      { fieldtype: "Column Break" },
+      {
+        fieldtype: "Button",
+        label: __("Add Row (Enter)"),
+        fieldname: "add_item_btn",
+      },
+      { fieldtype: "Section Break", label: __("Rows to Insert") },
+      {
+        fieldname: "items_table",
+        fieldtype: "Table",
+        cannot_add_rows: true,
+        in_place_edit: false,
+        data: [],
+        fields: [
+          { fieldtype: "Data", fieldname: "item_code", label: __("Item"), in_list_view: 1, read_only: 1 },
+          { fieldtype: "Data", fieldname: "item_name", label: __("Item Name"), in_list_view: 1, read_only: 1 },
+          { fieldtype: "Data", fieldname: "supplier", label: __("Supplier"), in_list_view: 1, read_only: 1 },
+          { fieldtype: "Float", fieldname: "qty", label: __("Qty"), in_list_view: 1 },
+          { fieldtype: "Check", fieldname: "select_for_po", label: __("Select"), in_list_view: 1 },
+          { fieldtype: "Data", fieldname: "descriptions", label: __("Description"), in_list_view: 1 },
+          { fieldtype: "Data", fieldname: "comments", label: __("Comments"), in_list_view: 1 },
+        ],
+      },
+    ],
+  });
+
+  dialog.fields_dict.warehouse.get_query = () => ({
+    filters: {
+      company: frm.doc.company || undefined,
+      disabled: 0,
+    },
+  });
+
+  dialog.fields_dict.header_html.$wrapper.html(`
+    <div style="display:flex;gap:12px;align-items:center;padding:12px;border-radius:14px;background:linear-gradient(135deg,#f1f5f9,#e2e8f0);border:1px solid #cbd5e1;margin-bottom:10px">
+      <div style="width:42px;height:42px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:#0f172a;color:#fff;font-size:18px">PO</div>
+      <div style="flex:1">
+        <div style="font-weight:900;font-size:16px">${frappe.utils.escape_html(__("PO Item Data Entry"))}</div>
+        <div style="color:#475569;font-size:12px">${frappe.utils.escape_html(__("Add multiple rows to PO Item table from one screen."))}</div>
+      </div>
+      <div style="font-size:12px;color:#475569">${frappe.utils.escape_html(__("Sales Order"))}: <b>${frappe.utils.escape_html(frm.doc.name || __("New"))}</b></div>
+    </div>
+  `);
+
+  function render_meta() {
+    const rowCount = items_data.length;
+    const totalQty = items_data.reduce((a, r) => a + toNum(r.qty), 0);
+    dialog.fields_dict.meta_html.$wrapper.html(`
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 10px;">
+        <span style="padding:4px 10px;border-radius:999px;background:#e2e8f0;color:#0f172a;font-weight:700;font-size:12px;">Rows: ${rowCount}</span>
+        <span style="padding:4px 10px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-weight:700;font-size:12px;">Total Qty: ${frappe.format(totalQty, { fieldtype: "Float" })}</span>
+        <span style="padding:4px 10px;border-radius:999px;background:#dcfce7;color:#166534;font-weight:700;font-size:12px;">Ready for Insert</span>
+      </div>
+    `);
+  }
+
+  async function load_items() {
+    const item_group = dialog.get_value("item_group");
+    const filters = { disabled: 0, is_purchase_item: 1 };
+    if (item_group) filters.item_group = item_group;
+
+    const r = await frappe.call({
+      method: "frappe.client.get_list",
+      args: {
+        doctype: "Item",
+        fields: ["name", "item_name", "description"],
+        filters,
+        order_by: "name asc",
+        limit_page_length: 500,
+      },
+    });
+
+    const rows = (r && r.message) ? r.message : [];
+    item_map = {};
+    const codes = rows.map((d) => {
+      item_map[d.name] = d;
+      return d.name;
+    });
+
+    const item_control = dialog.fields_dict.item_code;
+    item_control.get_query = () => ({ filters });
+    if (typeof item_control.set_data === "function") item_control.set_data(codes);
+    item_control.refresh();
+  }
+
+  function refresh_grid() {
+    dialog.fields_dict.items_table.df.data = items_data;
+    if (dialog.fields_dict.items_table.grid) {
+      dialog.fields_dict.items_table.grid.df.data = items_data;
+    }
+    dialog.fields_dict.items_table.grid.refresh();
+    render_meta();
+  }
+
+  function get_dialog_values() {
+    return {
+      supplier: dialog.get_value("supplier") || "",
+      item_code: dialog.get_value("item_code") || "",
+      qty: toNum(dialog.get_value("qty")),
+      descriptions: dialog.get_value("descriptions") || "",
+      comments: dialog.get_value("comments") || "",
+      select_for_po: toInt(dialog.get_value("select_for_po")),
+    };
+  }
+
+  async function add_row() {
+    const v = get_dialog_values();
+    if (!v.item_code) {
+      frappe.show_alert({ message: __("Select Item"), indicator: "orange" });
+      return;
+    }
+    if (!v.supplier) {
+      frappe.show_alert({ message: __("Select Supplier"), indicator: "orange" });
+      return;
+    }
+    if (toNum(v.qty) <= 0) {
+      frappe.msgprint(__("Qty must be greater than zero"));
+      return;
+    }
+
+    let item_meta = item_map[v.item_code] || null;
+    if (!item_meta) {
+      const r = await frappe.db.get_value("Item", v.item_code, ["item_name", "description"]);
+      const msg = (r && r.message) ? r.message : {};
+      item_meta = { name: v.item_code, item_name: msg.item_name || "", description: msg.description || "" };
+      item_map[v.item_code] = item_meta;
+    }
+
+    items_data.push({
+      item_code: v.item_code,
+      item_name: item_meta.item_name || "",
+      supplier: v.supplier || "",
+      qty: toNum(v.qty),
+      descriptions: v.descriptions || stripHtml(item_meta.description || ""),
+      comments: v.comments || "",
+      select_for_po: toInt(v.select_for_po),
+    });
+
+    refresh_grid();
+    dialog.set_value("item_code", "");
+    dialog.set_value("qty", 1);
+    dialog.set_value("descriptions", "");
+    dialog.set_value("comments", "");
+    setTimeout(() => dialog.fields_dict.item_code.$input.focus(), 20);
+  }
+
+  dialog.fields_dict.item_group.df.onchange = function () {
+    load_items();
+    dialog.set_value("item_code", "");
+  };
+
+  dialog.fields_dict.item_code.df.onchange = function () {
+    const code = dialog.get_value("item_code");
+    if (!code) return;
+    const item_meta = item_map[code] || {};
+    if (!dialog.get_value("descriptions") && item_meta.description) {
+      dialog.set_value("descriptions", stripHtml(item_meta.description));
+    }
+  };
+
+  dialog.fields_dict.add_item_btn.$input.off("click").on("click", (e) => {
+    e.preventDefault();
+    add_row();
+    return false;
+  });
+  dialog.$wrapper.on("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const in_grid = $(e.target).closest(".grid").length > 0;
+    const is_textarea = e.target && e.target.tagName === "TEXTAREA";
+    if (in_grid || is_textarea) return;
+    e.preventDefault();
+    add_row();
+  });
+
+  dialog.set_primary_action(__("Insert to PO Item Table"), () => {
+    if (!items_data.length) {
+      frappe.msgprint(__("Add at least one row."));
+      return;
+    }
+    items_data.forEach((r) => {
+      const row = frm.add_child("custom_po_item");
+      row.item = r.item_code;
+      row.supplier = r.supplier || "";
+      row.qty = toNum(r.qty);
+      row.descriptions = r.descriptions || "";
+      row.comments = r.comments || "";
+      row.select_for_po = toInt(r.select_for_po);
+    });
+    frm.refresh_field("custom_po_item");
+    frappe.show_alert({ message: __("Rows inserted in PO Item table"), indicator: "green" }, 4);
+    dialog.hide();
+  });
+
+  dialog.show();
+  dialog.$wrapper.find(".modal-dialog").css("max-width", "1120px");
+  // Compact professional single-line quick add layout
+  dialog.$wrapper.find('[data-fieldname="qty"]').closest(".form-column").css("max-width", "140px");
+  dialog.$wrapper.find('[data-fieldname="select_for_po"]').closest(".form-column").css("max-width", "140px");
+  dialog.$wrapper.find('[data-fieldname="add_item_btn"]').closest(".form-column").css({ "max-width": "180px", "display": "flex", "align-items": "flex-end" });
+  dialog.$wrapper.find('[data-fieldname="add_item_btn"] .btn').css({ "width": "100%", "font-weight": "700" });
+  setTimeout(() => {
+    load_items();
+    render_meta();
+    if (prefill && typeof prefill === "object") {
+      if (prefill.item_code) dialog.set_value("item_code", prefill.item_code);
+      if (prefill.qty) dialog.set_value("qty", flt(prefill.qty));
+      if (prefill.descriptions) dialog.set_value("descriptions", prefill.descriptions);
+      if (typeof prefill.select_for_po !== "undefined") {
+        dialog.set_value("select_for_po", cint(prefill.select_for_po) ? 1 : 0);
+      }
+    }
+    dialog.fields_dict.item_code.$input.focus();
+  }, 120);
+}
+
 frappe.ui.form.on("Sales Order", {
   refresh(frm) {
+    // Keep ERPNext native Create menu visible/primary.
+    setTimeout(() => {
+      if (frm.page && frm.page.set_inner_btn_group_as_primary) {
+        frm.page.set_inner_btn_group_as_primary(__("Create"));
+      }
+    }, 200);
+
+    if (frm.fields_dict.custom_po_item && frm.fields_dict.custom_po_item.grid) {
+      const g = frm.fields_dict.custom_po_item.grid;
+      g.update_docfield_property("warehouse", "read_only", 0);
+      g.update_docfield_property("warehouse", "in_list_view", 1);
+      g.update_docfield_property("warehouse", "columns", 2);
+      g.update_docfield_property("supplier", "columns", 2);
+      g.update_docfield_property("item", "columns", 2);
+      g.update_docfield_property("qty", "columns", 2);
+    }
+
     if (frm.doc.docstatus === 2) return;
+
+    frm.add_custom_button(__("PO Item Data Entry"), () => {
+      open_po_item_data_entry(frm);
+    }, __("PO Tools"));
+
     if (!frappe.model.can_create("Purchase Order")) return;
     if (!(frm.doc.custom_po_item || []).length) return;
 
@@ -1687,9 +1991,922 @@ frappe.ui.form.on("Sales Order", {
       }
 
       create_po_from_rows(frm, selectedPendingRows.map((row) => row.name));
-    }, __("Create"));
+    }, __("PO Tools"));
   },
 });
+
+// Final UI overrides (latest requested behavior)
+function _int(v) { return Math.round(Number(v || 0)); }
+function _n0(v) { return _int(v).toLocaleString(); }
+function _money0(v) {
+  try { return format_currency(_int(v || 0), null, 0); } catch (e) { return _n0(v); }
+}
+
+function bindMaterialShortageCreatePo($wrap, frm){
+  $wrap.find("[data-ms-create-po='1']").off("click").on("click", function(e){
+    e.preventDefault();
+    const item = ($(this).attr("data-item") || "").trim();
+    const defaultQty = flt($(this).attr("data-qty") || 0);
+    const description = ($(this).attr("data-description") || "").trim();
+    const wp = flt($(this).attr("data-wp") || 0);
+    const wq = flt($(this).attr("data-wq") || 0);
+    if (!item || defaultQty <= 0) {
+      frappe.msgprint(__("Invalid row for Create PO."));
+      return;
+    }
+    open_po_item_data_entry(frm, {
+      item_code: item,
+      qty: defaultQty,
+      descriptions: description || item,
+      select_for_po: 1,
+      custom_wastage_percentage: wp,
+      custom_wastage_qty: wq,
+    });
+  });
+}
+
+function open_po_item_data_entry(frm, prefill) {
+  if (frm.doc.docstatus === 2) {
+    frappe.msgprint(__("Cancelled Sales Order is not allowed."));
+    return;
+  }
+
+  let items_data = [];
+  let item_map = {};
+  let last_item_code = "";
+  const toNum = (v) => {
+    if (v === null || v === undefined || v === "") return 0;
+    if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+    const s = String(v).replace(/,/g, "").trim();
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const toInt = (v) => (cint(v) ? 1 : 0);
+  const stripHtml = (v) => String(v || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+
+  const dialog = new frappe.ui.Dialog({
+    title: __("PO Item Data Entry"),
+    size: "extra-large",
+    fields: [
+      { fieldname: "header_html", fieldtype: "HTML" },
+      { fieldname: "meta_html", fieldtype: "HTML" },
+      { fieldtype: "Section Break", label: __("Item Filters") },
+      { label: __("Supplier"), fieldname: "supplier", fieldtype: "Link", options: "Supplier", reqd: 1 },
+      { fieldtype: "Column Break" },
+      { label: __("Item Group"), fieldname: "item_group", fieldtype: "Link", options: "Item Group" },
+      { fieldtype: "Column Break" },
+      { label: __("Warehouse"), fieldname: "warehouse", fieldtype: "Link", options: "Warehouse" },
+      { fieldtype: "Column Break" },
+      { label: __("Select for PO"), fieldname: "select_for_po", fieldtype: "Check", default: 1 },
+      { fieldtype: "Section Break", label: __("Quick Add") },
+      { label: __("Item"), fieldname: "item_code", fieldtype: "Link", options: "Item", reqd: 1 },
+      { fieldtype: "Column Break" },
+      { label: __("Qty"), fieldname: "qty", fieldtype: "Float", default: 1, reqd: 1, precision: 0 },
+      { fieldtype: "Column Break" },
+      { label: __("Wastage %"), fieldname: "custom_wastage_percentage", fieldtype: "Float", precision: 2 },
+      { fieldtype: "Column Break" },
+      { label: __("Wastage Qty"), fieldname: "custom_wastage_qty", fieldtype: "Float", precision: 0, read_only: 1 },
+      { fieldtype: "Column Break" },
+      { label: __("Extra Qty"), fieldname: "extra_qty", fieldtype: "Float", default: 0, precision: 0 },
+      { fieldtype: "Column Break" },
+      { label: __("PO Qty"), fieldname: "po_qty", fieldtype: "Float", precision: 0, read_only: 1 },
+      { fieldtype: "Section Break" },
+      { label: __("Description"), fieldname: "descriptions", fieldtype: "Data" },
+      { fieldtype: "Column Break" },
+      { label: __("Comments"), fieldname: "comments", fieldtype: "Data" },
+      { fieldtype: "Column Break" },
+      { fieldtype: "Button", label: __("Add Row (Enter)"), fieldname: "add_item_btn" },
+      { fieldtype: "Section Break", label: __("Rows to Insert") },
+      {
+        fieldname: "items_table",
+        fieldtype: "Table",
+        cannot_add_rows: true,
+        in_place_edit: false,
+        data: [],
+        fields: [
+          { fieldtype: "Data", fieldname: "item_code", label: __("Item"), in_list_view: 1, read_only: 1 },
+          { fieldtype: "Data", fieldname: "item_name", label: __("Item Name"), in_list_view: 1, read_only: 1 },
+          { fieldtype: "Data", fieldname: "supplier", label: __("Supplier"), in_list_view: 1, read_only: 1 },
+          { fieldtype: "Data", fieldname: "warehouse", label: __("Warehouse"), in_list_view: 1, read_only: 1 },
+          { fieldtype: "Float", fieldname: "base_qty", label: __("Qty"), in_list_view: 1 },
+          { fieldtype: "Float", fieldname: "custom_wastage_percentage", label: __("Wastage %"), in_list_view: 1 },
+          { fieldtype: "Float", fieldname: "custom_wastage_qty", label: __("Wastage Qty"), in_list_view: 1 },
+          { fieldtype: "Float", fieldname: "extra_qty", label: __("Extra Qty"), in_list_view: 1 },
+          { fieldtype: "Float", fieldname: "po_qty", label: __("PO Qty"), in_list_view: 1 },
+          { fieldtype: "Check", fieldname: "select_for_po", label: __("Select"), in_list_view: 1 },
+          { fieldtype: "Data", fieldname: "descriptions", label: __("Description"), in_list_view: 1 },
+          { fieldtype: "Data", fieldname: "comments", label: __("Comments"), in_list_view: 1 },
+        ],
+      },
+    ],
+  });
+
+  dialog.fields_dict.warehouse.get_query = () => ({
+    filters: {
+      company: frm.doc.company || undefined,
+      disabled: 0,
+    },
+  });
+
+  dialog.fields_dict.header_html.$wrapper.html(`
+    <div style="display:flex;gap:12px;align-items:center;padding:12px;border-radius:14px;background:linear-gradient(135deg,#f1f5f9,#e2e8f0);border:1px solid #cbd5e1;margin-bottom:8px">
+      <div style="width:42px;height:42px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:#0f172a;color:#fff;font-size:18px">PO</div>
+      <div style="flex:1">
+        <div style="font-weight:900;font-size:16px">${frappe.utils.escape_html(__("PO Item Data Entry"))}</div>
+        <div style="color:#475569;font-size:12px">${frappe.utils.escape_html(__("Add multiple rows to PO Item table from one screen."))}</div>
+      </div>
+      <div style="font-size:12px;color:#475569">${frappe.utils.escape_html(__("Sales Order"))}: <b>${frappe.utils.escape_html(frm.doc.name || __("New"))}</b></div>
+    </div>
+  `);
+
+  function render_meta() {
+    const rowCount = items_data.length;
+    const totalQty = items_data.reduce((a, r) => a + toNum(r.po_qty || r.qty), 0);
+    const ratio = Math.min(100, Math.max(0, rowCount ? 60 + rowCount * 5 : 8));
+    dialog.fields_dict.meta_html.$wrapper.html(`
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span style="padding:4px 10px;border-radius:999px;background:#e2e8f0;color:#0f172a;font-weight:700;font-size:12px;">Rows: ${rowCount}</span>
+        <span style="padding:4px 10px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-weight:700;font-size:12px;">Total Qty: ${_n0(totalQty)}</span>
+        <span style="padding:4px 10px;border-radius:999px;background:#dcfce7;color:#166534;font-weight:700;font-size:12px;">Ready for Insert</span>
+      </div>
+      <div style="margin-top:8px;width:100%;height:8px;border-radius:999px;background:#e2e8f0;overflow:hidden;">
+        <div style="height:8px;width:${ratio}%;background:linear-gradient(90deg,#16a34a,#22c55e);"></div>
+      </div>
+    `);
+  }
+
+  async function load_items() {
+    const item_group = dialog.get_value("item_group");
+    const filters = { disabled: 0, is_purchase_item: 1 };
+    if (item_group) filters.item_group = item_group;
+    const r = await frappe.call({
+      method: "frappe.client.get_list",
+      args: { doctype: "Item", fields: ["name", "item_name", "description"], filters, order_by: "name asc", limit_page_length: 500 },
+    });
+    const rows = (r && r.message) ? r.message : [];
+    item_map = {};
+    rows.forEach((d) => { item_map[d.name] = d; });
+    dialog.fields_dict.item_code.get_query = () => ({ filters });
+    dialog.fields_dict.item_code.refresh();
+    if (!dialog.get_value("item_code")) {
+      if (last_item_code && item_map[last_item_code]) {
+        dialog.set_value("item_code", last_item_code);
+      } else if (rows.length) {
+        dialog.set_value("item_code", rows[0].name);
+      }
+    }
+  }
+
+  function refresh_grid() {
+    dialog.fields_dict.items_table.df.data = items_data;
+    if (dialog.fields_dict.items_table.grid) {
+      dialog.fields_dict.items_table.grid.df.data = items_data;
+    }
+    dialog.fields_dict.items_table.grid.refresh();
+    render_meta();
+  }
+
+  function recalc_qty_fields() {
+    const qty = toNum(dialog.get_value("qty"));
+    const wp = toNum(dialog.get_value("custom_wastage_percentage"));
+    const extra = toNum(dialog.get_value("extra_qty"));
+    const wq = (qty * wp) / 100;
+    const poQty = qty + wq + extra;
+    dialog.set_value("custom_wastage_qty", wq);
+    dialog.set_value("po_qty", poQty);
+  }
+
+  async function add_row() {
+    const supplier = (dialog.get_value("supplier") || "").trim();
+    const warehouse = (dialog.get_value("warehouse") || "").trim();
+    const item_code = (dialog.get_value("item_code") || "").trim();
+    const qty_raw = dialog.get_value("qty");
+    const qty = toNum(qty_raw || 1);
+    const descriptions = dialog.get_value("descriptions") || "";
+    const comments = dialog.get_value("comments") || "";
+    const select_for_po = toInt(dialog.get_value("select_for_po"));
+    const custom_wastage_percentage = toNum(dialog.get_value("custom_wastage_percentage"));
+    const custom_wastage_qty = (qty * custom_wastage_percentage) / 100;
+    const extra_qty = toNum(dialog.get_value("extra_qty"));
+    const po_qty = qty + custom_wastage_qty + extra_qty;
+
+    if (!supplier) {
+      frappe.show_alert({ message: __("Select Supplier"), indicator: "orange" });
+      return;
+    }
+    if (!item_code) {
+      frappe.show_alert({ message: __("Select Item"), indicator: "orange" });
+      return;
+    }
+    if (qty <= 0) {
+      frappe.msgprint(__("Qty must be greater than zero"));
+      return;
+    }
+
+    let item_meta = item_map[item_code] || null;
+    if (!item_meta) {
+      const r = await frappe.db.get_value("Item", item_code, ["item_name", "description"]);
+      const msg = (r && r.message) ? r.message : {};
+      item_meta = { name: item_code, item_name: msg.item_name || "", description: msg.description || "" };
+      item_map[item_code] = item_meta;
+    }
+
+    items_data.push({
+      item_code,
+      item_name: item_meta.item_name || "",
+      supplier,
+      warehouse,
+      base_qty: qty,
+      qty: po_qty,
+      descriptions: descriptions || stripHtml(item_meta.description || ""),
+      comments: comments || "",
+      select_for_po,
+      custom_wastage_percentage,
+      custom_wastage_qty,
+      extra_qty,
+      po_qty,
+    });
+
+    last_item_code = item_code;
+    refresh_grid();
+    dialog.set_value("item_code", last_item_code);
+    dialog.set_value("qty", 1);
+    dialog.set_value("custom_wastage_percentage", 0);
+    dialog.set_value("custom_wastage_qty", 0);
+    dialog.set_value("extra_qty", 0);
+    dialog.set_value("po_qty", 1);
+    dialog.set_value("descriptions", "");
+    dialog.set_value("comments", "");
+    setTimeout(() => dialog.fields_dict.item_code.$input.focus(), 20);
+  }
+
+  dialog.fields_dict.item_group.df.onchange = function () { load_items(); dialog.set_value("item_code", ""); };
+  dialog.fields_dict.qty.df.onchange = recalc_qty_fields;
+  dialog.fields_dict.custom_wastage_percentage.df.onchange = recalc_qty_fields;
+  dialog.fields_dict.extra_qty.df.onchange = recalc_qty_fields;
+  dialog.fields_dict.item_code.df.onchange = function () {
+    const code = dialog.get_value("item_code");
+    if (!code) return;
+    const item_meta = item_map[code] || {};
+    if (!dialog.get_value("descriptions") && item_meta.description) dialog.set_value("descriptions", stripHtml(item_meta.description));
+  };
+
+  function bind_add_row_button() {
+    const addBtnField = dialog.fields_dict.add_item_btn;
+    const $buttons = addBtnField.$wrapper.find("button, .btn");
+    $buttons.off("click.po_row").on("click.po_row", async (e) => {
+      e.preventDefault();
+      try {
+        await add_row();
+      } catch (err) {
+        frappe.msgprint(__("Unable to add row. Please try again."));
+        console.error(err);
+      }
+      return false;
+    }).css({ background: "#2563eb", border: "1px solid #1d4ed8", color: "#fff", fontWeight: "700" });
+  }
+
+  dialog.$wrapper.on("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const in_grid = $(e.target).closest(".grid").length > 0;
+    const is_textarea = e.target && e.target.tagName === "TEXTAREA";
+    if (in_grid || is_textarea) return;
+    e.preventDefault();
+    add_row();
+  });
+
+  dialog.set_primary_action(__("Insert to PO Item Table"), () => {
+    if (!items_data.length) {
+      frappe.msgprint(__("Add at least one row."));
+      return;
+    }
+    items_data.forEach((r) => {
+      const row = frm.add_child("custom_po_item");
+      row.item = r.item_code;
+      row.supplier = r.supplier || "";
+      row.warehouse = r.warehouse || "";
+      row.qty = toNum(r.po_qty || r.qty);
+      row.custom_base_qty = toNum(r.base_qty);
+      row.descriptions = r.descriptions || "";
+      row.comments = r.comments || "";
+      row.select_for_po = toInt(r.select_for_po);
+      row.custom_wastage_percentage = toNum(r.custom_wastage_percentage);
+      row.custom_wastage_qty = toNum(r.custom_wastage_qty);
+      row.custom_extra_qty = toNum(r.extra_qty);
+      row.custom_po_qty = toNum(r.po_qty || r.qty);
+    });
+    frm.refresh_field("custom_po_item");
+    frappe.show_alert({ message: __("Rows inserted in PO Item table"), indicator: "green" }, 4);
+    dialog.hide();
+  });
+
+  dialog.show();
+  dialog.$wrapper.find(".modal-dialog").css({ width: "98vw", maxWidth: "98vw" });
+  dialog.$wrapper.find('[data-fieldname="qty"]').closest(".form-column").css("max-width", "140px");
+  dialog.$wrapper.find('[data-fieldname="select_for_po"]').closest(".form-column").css("max-width", "180px");
+  dialog.$wrapper.find('[data-fieldname="add_item_btn"]').closest(".form-column").css({ maxWidth: "210px", display: "flex", alignItems: "flex-end" });
+  const $tbl = dialog.$wrapper.find('[data-fieldname="items_table"]').closest(".frappe-control");
+  $tbl.closest(".form-column").css({ flex: "0 0 100%", maxWidth: "100%" });
+  dialog.$wrapper.find('[data-fieldname="items_table"]').closest(".form-group, .frappe-control, .form-column").css({ width: "100%" });
+  $tbl.css({ width: "100%" });
+  $tbl.find(".grid-body").css({ maxHeight: "340px", overflowY: "auto", overflowX: "auto", width: "100%" });
+  $tbl.find(".grid-body .rows, .grid-heading-row").css({ width: "100%" });
+  $tbl.find(".grid-heading-row .grid-row, .grid-body .grid-row").css({ width: "100%" });
+
+  // Bind after dialog render so click always works
+  bind_add_row_button();
+  ["qty", "custom_wastage_percentage", "extra_qty"].forEach((fn) => {
+    const f = dialog.fields_dict[fn];
+    if (f && f.$input) {
+      f.$input.off("input.po_calc change.po_calc").on("input.po_calc change.po_calc", recalc_qty_fields);
+    }
+  });
+
+  setTimeout(() => {
+    load_items();
+    render_meta();
+    if (prefill && typeof prefill === "object") {
+      if (prefill.item_code) dialog.set_value("item_code", prefill.item_code);
+      if (prefill.warehouse) dialog.set_value("warehouse", prefill.warehouse);
+      if (prefill.qty) dialog.set_value("qty", flt(prefill.qty));
+      if (prefill.descriptions) dialog.set_value("descriptions", prefill.descriptions);
+      if (typeof prefill.select_for_po !== "undefined") dialog.set_value("select_for_po", cint(prefill.select_for_po) ? 1 : 0);
+      if (typeof prefill.custom_wastage_percentage !== "undefined") dialog.set_value("custom_wastage_percentage", flt(prefill.custom_wastage_percentage));
+      if (typeof prefill.custom_wastage_qty !== "undefined") dialog.set_value("custom_wastage_qty", flt(prefill.custom_wastage_qty));
+      if (typeof prefill.extra_qty !== "undefined") dialog.set_value("extra_qty", flt(prefill.extra_qty));
+    }
+    last_item_code = dialog.get_value("item_code") || last_item_code;
+    bind_add_row_button();
+    recalc_qty_fields();
+    dialog.fields_dict.item_code.$input.focus();
+  }, 150);
+}
+
+function purchaseFlowTable(rows){
+  rows = rows || [];
+  const body = rows.length ? rows.map((r) => `
+    <tr>
+      <td>${r.purchase_order ? docLink("Purchase Order", r.purchase_order) : `<span class="text-muted">Not Created</span>`}</td>
+      <td>${esc(r.supplier || "-")}</td>
+      <td>${badge(r.po_status)}</td>
+      <td style="text-align:right;">${flt(r.ordered_qty)}</td>
+      <td style="text-align:right;">${flt(r.received_qty)}</td>
+      <td style="text-align:right;">${flt(r.pending_qty)}</td>
+      <td style="text-align:right;">${esc(r.received_pct || 0)}%</td>
+      <td style="text-align:right;">${esc(r.pending_pct || 0)}%</td>
+      <td style="text-align:right;">${_money0(r.po_cost || 0)}</td>
+      <td>${_csvDocLinks("Purchase Receipt", r.purchase_receipts)}</td>
+      <td>${esc(r.pr_status || "-")}</td>
+      <td>${_csvDocLinks("Purchase Invoice", r.purchase_invoices)}</td>
+      <td>${esc(r.pi_status || "-")}</td>
+    </tr>
+  `).join("") : `<tr><td colspan="13" class="text-muted">No purchase flow records.</td></tr>`;
+  return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;">
+    <thead><tr>
+      <th>PO Number</th><th>Supplier</th><th>PO Status</th>
+      <th style="text-align:right;">Ordered</th><th style="text-align:right;">Received</th><th style="text-align:right;">Pending</th>
+      <th style="text-align:right;">Rec %</th><th style="text-align:right;">Pend %</th>
+      <th style="text-align:right;">PO Cost</th>
+      <th>Purchase Receipts</th><th>PR Status</th>
+      <th>Purchase Invoices</th><th>PI Status</th>
+    </tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`;
+}
+
+function materialShortageTable(rows){
+  rows = rows || [];
+  if(!rows.length) return `<div class="text-muted">No grouped shortage found.</div>`;
+  const groupMap = {};
+  rows.forEach((r) => { const g = r.item_group || "Uncategorized"; if (!groupMap[g]) groupMap[g] = []; groupMap[g].push(r); });
+  const groups = Object.keys(groupMap).sort();
+  let body = "";
+  groups.forEach((g, i) => {
+    const key = `ms_group_${i}_${String(g).replace(/[^a-zA-Z0-9]/g, "_")}`;
+    const list = groupMap[g] || [];
+    const req = list.reduce((a, r) => a + Number(r.required_qty || 0), 0);
+    const wsb = list.reduce((a, r) => a + Number(r.wastage_qty || 0), 0);
+    const stk = list.reduce((a, r) => a + Number(r.stock_qty || 0), 0);
+    const sht = list.reduce((a, r) => a + Number(r.shortage_qty || 0), 0);
+    const sug = sht + wsb;
+    const poq = list.reduce((a, r) => a + Number(r.po_qty || 0), 0);
+    const wpct = Number((list[0] && list[0].wastage_pct) || 0);
+    const wsp = (poq * wpct) / 100;
+    const prq = list.reduce((a, r) => a + Number(r.pr_qty || 0), 0);
+    const ppq = list.reduce((a, r) => a + Number(r.pending_po_qty || 0), 0);
+    body += `
+      <tr class="so-group-row" data-toggle="so" data-target="${esc(key)}" style="cursor:pointer;background:#f8fafc;">
+        <td style="font-weight:900;width:13%;min-width:160px;"><span data-icon>▸</span> ${esc(g)}</td>
+        <td style="text-align:right;">-</td>
+        <td style="text-align:right;">${_n0(req)}</td>
+        <td style="text-align:right;">${_n0(wsb)}</td>
+        <td style="text-align:right;background:#f1f5f9;">${_n0(stk)}</td>
+        <td style="text-align:right;" class="${sht>0?'so-danger':'so-success'}">${_n0(sht)}</td>
+        <td style="text-align:right;">${_n0(sug)}</td>
+        <td style="text-align:right;">${_n0(poq)}</td>
+        <td style="text-align:right;">${_n0(wsp)}</td>
+        <td style="text-align:right;">${_n0(prq)}</td>
+        <td style="text-align:right;" class="${ppq>0?'so-warning':'so-success'}">${_n0(ppq)}</td>
+        <td></td>
+      </tr>
+    `;
+    list.forEach((r) => {
+      const createQty = Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0);
+      const wp = Number(r.wastage_pct || 0);
+      const wpo = Number(r.po_qty || 0) * wp / 100;
+      body += `
+        <tr data-panel="${esc(key)}" style="display:none;">
+          <td style="padding-left:26px;width:13%;min-width:160px;">${esc(r.item_code || "")}</td>
+          <td style="text-align:right;">${(Number(r.qty_per_bom || 0)).toFixed(2)}</td>
+          <td style="text-align:right;">${_n0(r.required_qty)}</td>
+          <td style="text-align:right;">${_n0(r.wastage_qty || 0)}</td>
+          <td style="text-align:right;background:#f1f5f9;">${_n0(r.stock_qty)}</td>
+          <td style="text-align:right;" class="${Number(r.shortage_qty||0)>0?'so-danger':'so-success'}">${_n0(r.shortage_qty)}</td>
+          <td style="text-align:right;">${_n0((Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0)))}</td>
+          <td style="text-align:right;">${_n0(r.po_qty)}</td>
+          <td style="text-align:right;">${_n0(wpo)}</td>
+          <td style="text-align:right;">${_n0(r.pr_qty)}</td>
+          <td style="text-align:right;" class="${Number(r.pending_po_qty||0)>0?'so-warning':'so-success'}">${_n0(r.pending_po_qty)}</td>
+          <td>
+            ${createQty > 0 ? `<button class="btn btn-xs btn-primary" data-ms-create-po="1" data-item="${esc(r.item_code || "")}" data-qty="${esc(createQty)}" data-description="${esc(r.item_code || "")}" data-wp="${esc(wp)}" data-wq="${esc(r.wastage_qty || 0)}">${__("Create PO")}</button>` : `<span class="text-muted">-</span>`}
+          </td>
+        </tr>
+      `;
+    });
+  });
+  return `<div class="table-responsive">
+    <table class="table table-bordered so-table" style="margin:0;">
+      <thead>
+        <tr>
+          <th style="width:13%;min-width:160px;">Item Group / Raw Material</th>
+          <th style="width:120px;text-align:right;">Qty/BOM</th>
+          <th style="width:130px;text-align:right;">Required</th>
+          <th style="width:130px;text-align:right;">Wastage on BOM</th>
+          <th style="width:100px;text-align:right;">Stock</th>
+          <th style="width:120px;text-align:right;">Shortage</th>
+          <th style="width:130px;text-align:right;">Suggested Qty</th>
+          <th style="width:100px;text-align:right;">PO Qty</th>
+          <th style="width:130px;text-align:right;">Wastage on PO</th>
+          <th style="width:100px;text-align:right;">PR Qty</th>
+          <th style="width:130px;text-align:right;">Pending PO Qty</th>
+          <th style="width:120px;">Create PO</th>
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>
+  </div>`;
+}
+
+function profitSummaryCard(s){
+  s = s || {};
+  return `
+    <div class="so-grid-3">
+      <div class="so-mini-card"><div class="so-mini-title">SALES</div><div class="so-mini-val">${_money0(s.sales_amount || 0)}</div></div>
+      <div class="so-mini-card"><div class="so-mini-title">ESTIMATED COST</div><div class="so-mini-val">${_money0(s.estimated_cost || 0)}</div></div>
+      <div class="so-mini-card"><div class="so-mini-title">ESTIMATED PROFIT</div><div class="so-mini-val">${_money0(s.estimated_profit || 0)}</div></div>
+    </div>
+    <div style="margin-top:10px;font-weight:900;">Margin: ${_n0(s.margin_pct || 0)}%</div>
+  `;
+}
+
+function profitByItemTable(rows){
+  rows = rows || [];
+  const body = rows.length ? rows.map(r => `
+    <tr>
+      <td>${esc(r.item_code||"")}</td>
+      <td style="text-align:right;">${_n0(r.qty)}</td>
+      <td>${esc(r.default_bom || "—")}</td>
+      <td style="text-align:right;">${_money0(r.bom_unit_cost)}</td>
+      <td style="text-align:right;">${_money0(r.sales_amount)}</td>
+      <td style="text-align:right;">${_money0(r.estimated_cost)}</td>
+      <td style="text-align:right;">${_money0(r.estimated_profit)}</td>
+      <td style="text-align:right;">${_n0(r.margin_pct||0)}%</td>
+    </tr>
+  `).join("") : `<tr><td colspan="8" class="text-muted">No profit records.</td></tr>`;
+  return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;">
+    <thead><tr><th>Item</th><th style="width:100px;text-align:right;">Qty</th><th>Default BOM</th><th style="width:120px;text-align:right;">BOM Cost</th><th style="width:150px;text-align:right;">Sales</th><th style="width:150px;text-align:right;">Est. Cost</th><th style="width:150px;text-align:right;">Est. Profit</th><th style="width:110px;text-align:right;">Margin %</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+
+function profitGroupPurchaseTable(rows){
+  rows = rows || [];
+  const body = rows.length ? rows.map(r => `<tr><td>${esc(r.item_group || 'Uncategorized')}</td><td style="text-align:right;">${_money0(r.po_amount || 0)}</td></tr>`).join("")
+    : `<tr><td colspan="2" class="text-muted">No purchase-order amount found for this Sales Order.</td></tr>`;
+  return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;"><thead><tr><th>Item Group</th><th style="text-align:right;">PO Amount</th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function labourCostTable(rows, summary){
+  rows = rows || []; summary = summary || {};
+  const body = rows.length ? rows.map(r => `
+    <tr><td>${esc(r.employee || "-")}</td><td>${esc(r.name1 || "-")}</td><td>${esc(r.product || "-")}</td><td>${esc(r.process_type || "-")}</td>
+    <td style="text-align:right;">${_n0(r.qty)}</td><td style="text-align:right;">${_n0(r.rate)}</td><td style="text-align:right;">${_money0(r.labour_cost || 0)}</td></tr>
+  `).join("") : `<tr><td colspan="7" class="text-muted">No employee item-wise labour cost for this Sales Order.</td></tr>`;
+  return `
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(260px,1fr));gap:12px;margin-bottom:12px;">
+      <div class="so-mini-card" style="height:132px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;padding:14px 16px;"><div class="so-mini-title">LABOUR QTY</div><div class="so-mini-val" style="font-size:30px;line-height:1.1;">${_n0(summary.total_qty || 0)}</div></div>
+      <div class="so-mini-card" style="height:132px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;padding:14px 16px;"><div class="so-mini-title">TOTAL LABOUR COST</div><div class="so-mini-val" style="font-size:30px;line-height:1.1;">${_money0(summary.total_cost || 0)}</div></div>
+    </div>
+    <div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;"><thead><tr><th>Employee</th><th>Name</th><th>Item</th><th>Process</th><th style="text-align:right;">Qty</th><th style="text-align:right;">Rate</th><th style="text-align:right;">Labour Cost</th></tr></thead><tbody>${body}</tbody></table></div>
+  `;
+}
+
+function buildDashboard(frm, data){
+  const totals = data.production_totals || {};
+  const poTotal = poTotalAmount(data.po_item_group_summary || []);
+  return `
+    ${css()}
+    <div class="so-hdr">
+      <div class="so-title">Sales Order Connection Report</div>
+      <div class="so-sub">Sales Order: <b>${esc(frm.doc.name)}</b></div>
+      ${kpis(totals)}
+    </div>
+
+    ${sectionBlock('profit', 'Profit and Loss Section', 'linear-gradient(90deg,#0f766e,#14b8a6)', `
+      ${card("Profit Dashboard", "Estimated cost from default BOM and sales amount", `${profitSummaryCard(data.profit_summary || {})}<div style="margin-top:12px;font-weight:900;">Profit by Item</div>${profitByItemTable(data.profit_by_item || [])}`)}
+      ${card("Purchase Order Total Amount", "Total amount of Purchase Orders linked with this Sales Order", `<div class="so-mini-card"><div class="so-mini-title">TOTAL PO AMOUNT</div><div class="so-mini-val" style="font-size:26px;">${_money0(poTotal)}</div></div>`)}
+      ${card("PO Amount by Item Group", "Purchase Order amount summary linked with this Sales Order", profitGroupPurchaseTable(data.po_item_group_summary || []))}
+      ${card("Employee Item-wise Labour Cost", "From per-piece-report > Employee item-wise", labourCostTable(data.labour_cost_employee_item_wise || [], data.labour_cost_summary || {}))}
+    `, false)}
+
+    ${sectionBlock('purchase', 'Purchase Order Section', 'linear-gradient(90deg,#7c3aed,#9333ea)', `
+      ${card("PO Analytics (From PO Tab)", "Item Group-Wise PO Status", `${poAnalyticsOverviewCard((data.custom_po_analytics || {}).overview || {})}${poItemGroupTable((data.custom_po_analytics || {}).item_group_rows || [])}`)}
+      ${card("Material Shortage & Purchase Suggestion", "Grouped by Item Group with PO and PR planning progress", materialShortageTable(data.material_shortage || []))}
+      ${card("PO-Wise status Report", "Collapsed by Supplier", poStatusDetailTable((data.custom_po_analytics || {}).po_status_rows || []))}
+      ${card("Purchase Flow Tracker", "PO + Purchase Receipt + Purchase Invoice in one row with PO cost", purchaseFlowTable(data.purchase_flow_rows || []))}
+    `, false)}
+
+    ${sectionBlock('production', 'Production Section', 'linear-gradient(90deg,#7a3e00,#a16207)', `
+      ${card("Production", "Production Plan -> Work Order -> Job Cards / Operations / Employees / Materials", productionTree(data.production_tree||[]))}
+      ${card("Production Timeline", "Work Orders, Delivery Notes and Invoices timeline", timelineView(data.gantt_timeline || []))}
+      ${card("Machine Utilization", "Workstation time from Job Card Time Logs", machineUtilization(data.machine_utilization || []))}
+      ${card("Employee Efficiency", "Completed quantity vs time spent", employeeEfficiency(data.employee_efficiency || []))}
+    `, false)}
+
+    ${sectionBlock('bom', 'BOM and Raw Material Section', 'linear-gradient(90deg,#0891b2,#06b6d4)', `${card("BOM & Raw Materials", "Item and BOM merged for easier reading", bomTree(data.bom_tree||[]))}`, false)}
+
+    ${sectionBlock('dispatch', 'Dispatch Section', 'linear-gradient(90deg,#ea580c,#f97316)', `
+      ${card("Order Item Summary", "Ordered, delivered, invoiced and pending quantity by item", orderItemSummaryTable(data.order_item_summary || []))}
+      ${card("Delivery & Billing", "Delivery Note -> Invoices, click document number for popup detail", deliveryHierarchy(data.sales_fulfillment_hierarchy||[]))}
+      ${card("Delivery Risk Prediction", "Delivery delay warning based on completion and delivery date", deliveryPredictionCard(data.delivery_prediction || {}))}
+    `, false)}
+  `;
+}
+
+// Final overrides (keep at end so they win over earlier duplicate definitions)
+function poItemGroupTable(rows){
+  rows = rows || [];
+  if (!rows.length) {
+    return `<div class="text-muted">No item-group analytics found.</div>`;
+  }
+
+  const groupMap = {};
+  rows.forEach((r) => {
+    const g = r.item_group || "Uncategorized";
+    if (!groupMap[g]) groupMap[g] = [];
+    groupMap[g].push(r);
+  });
+
+  const groups = Object.keys(groupMap).sort();
+  let html = "";
+
+  groups.forEach((g, idx) => {
+    const key = `po_item_group_${idx}_${g.replace(/[^a-zA-Z0-9]/g, "_")}`;
+    const items = (groupMap[g] || []).sort((a, b) => {
+      const ai = String(a.item || "");
+      const bi = String(b.item || "");
+      const ao = String(a.order_number || "");
+      const bo = String(b.order_number || "");
+      return ai.localeCompare(bi) || ao.localeCompare(bo);
+    });
+
+    let totalOrdered = 0;
+    let totalReceived = 0;
+    let totalPending = 0;
+    let doneCount = 0;
+    let progressCount = 0;
+    let pendingCount = 0;
+    items.forEach((r) => {
+      totalOrdered += Number(r.ordered_qty || 0);
+      totalReceived += Number(r.received_qty || 0);
+      totalPending += Number(r.pending_qty || 0);
+      const status = String(r.po_status || "").toLowerCase();
+      if (status.includes("complete") || status.includes("close")) doneCount += 1;
+      else if (status.includes("progress") || status.includes("part")) progressCount += 1;
+      else pendingCount += 1;
+    });
+
+    const overallStatus = totalPending <= 0 ? "Completed" : "In Progress";
+    const recPct = totalOrdered ? ((totalReceived * 100) / totalOrdered).toFixed(2) : "0.00";
+
+    html += `
+      <tr class="so-group-row" data-toggle="so" data-target="${esc(key)}" style="cursor:pointer;background:#f8fafc;">
+        <td style="font-weight:900;width:13%;min-width:140px;"><span data-icon>▸</span> ${esc(g)}</td>
+        <td colspan="2">${badge(overallStatus)} <span class="muted">Done ${doneCount} • In Progress ${progressCount} • Pending ${pendingCount}</span></td>
+        <td style="text-align:right;">${_n0(totalOrdered)}</td>
+        <td style="text-align:right;">${_n0(totalReceived)}</td>
+        <td style="text-align:right;">${_n0(totalPending)}</td>
+        <td style="text-align:right;">${recPct}%</td>
+        <td style="text-align:right;">${(100 - Number(recPct || 0)).toFixed(2)}%</td>
+        <td>${badge(overallStatus)}</td>
+      </tr>
+    `;
+
+    items.forEach((r) => {
+      html += `
+        <tr data-panel="${esc(key)}" style="display:none;">
+          <td style="padding-left:26px;width:13%;min-width:140px;">${esc(r.item || "-")}</td>
+          <td>${esc(r.supplier_name || "-")}</td>
+          <td>${r.order_number ? docLink("Purchase Order", r.order_number) : `<span class="text-muted">-</span>`}</td>
+          <td style="text-align:right;">${_n0(r.ordered_qty)}</td>
+          <td style="text-align:right;">${_n0(r.received_qty)}</td>
+          <td style="text-align:right;">${_n0(r.pending_qty)}</td>
+          <td style="text-align:right;">${esc(r.received_pct || 0)}%</td>
+          <td style="text-align:right;">${esc(r.pending_pct || 0)}%</td>
+          <td>${badge(r.po_status || "")}</td>
+        </tr>
+      `;
+    });
+  });
+
+  return `
+    <div class="table-responsive">
+      <table class="table table-bordered so-table" style="margin:0;">
+        <thead>
+          <tr>
+            <th style="width:13%;min-width:140px;">Item Group / Item</th>
+            <th>Supplier Name</th>
+            <th>Order Number</th>
+            <th style="text-align:right;">Ordered</th>
+            <th style="text-align:right;">Received</th>
+            <th style="text-align:right;">Pending</th>
+            <th style="text-align:right;">Rec %</th>
+            <th style="text-align:right;">Pending %</th>
+            <th>PO Status</th>
+          </tr>
+        </thead>
+        <tbody>${html}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function _csvDocLinks(doctype, csvText){
+  const raw = String(csvText || "").trim();
+  if (!raw) return `<span class="text-muted">-</span>`;
+  const names = raw.split(",").map((x) => x.trim()).filter(Boolean);
+  if (!names.length) return `<span class="text-muted">-</span>`;
+  return names.map((n) => docLink(doctype, n)).join(", ");
+}
+
+function purchaseFlowTable(rows){
+  rows = rows || [];
+  const body = rows.length ? rows.map((r) => `
+    <tr>
+      <td>${r.purchase_order ? docLink("Purchase Order", r.purchase_order) : `<span class="text-muted">Not Created</span>`}</td>
+      <td>${esc(r.supplier || "-")}</td>
+      <td>${badge(r.po_status)}</td>
+      <td style="text-align:right;">${_n0(r.ordered_qty)}</td>
+      <td style="text-align:right;">${_n0(r.received_qty)}</td>
+      <td style="text-align:right;">${_n0(r.pending_qty)}</td>
+      <td style="text-align:right;">${esc(r.received_pct || 0)}%</td>
+      <td style="text-align:right;">${esc(r.pending_pct || 0)}%</td>
+      <td style="text-align:right;">${_money0(r.po_cost || 0)}</td>
+      <td>${_csvDocLinks("Purchase Receipt", r.purchase_receipts)}</td>
+      <td>${esc(r.pr_status || "-")}</td>
+      <td>${_csvDocLinks("Purchase Invoice", r.purchase_invoices)}</td>
+      <td>${esc(r.pi_status || "-")}</td>
+    </tr>
+  `).join("") : `<tr><td colspan="13" class="text-muted">No purchase flow records.</td></tr>`;
+
+  return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;">
+    <thead><tr>
+      <th>PO Number</th><th>Supplier</th><th>PO Status</th>
+      <th style="text-align:right;">Ordered</th><th style="text-align:right;">Received</th><th style="text-align:right;">Pending</th>
+      <th style="text-align:right;">Rec %</th><th style="text-align:right;">Pend %</th>
+      <th style="text-align:right;">PO Cost</th>
+      <th>Purchase Receipts</th><th>PR Status</th>
+      <th>Purchase Invoices</th><th>PI Status</th>
+    </tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`;
+}
+
+// Final purchase-section overrides
+function poStatusDetailTable(rows){
+  rows = rows || [];
+  if (!rows.length) {
+    return `<div class="text-muted">No PO analytics found.</div>`;
+  }
+
+  const supplierMap = {};
+  rows.forEach((r) => {
+    const s = r.supplier || "No Supplier";
+    if (!supplierMap[s]) supplierMap[s] = [];
+    supplierMap[s].push(r);
+  });
+
+  const suppliers = Object.keys(supplierMap).sort();
+  let body = "";
+
+  suppliers.forEach((s, i) => {
+    const key = `po_supplier_${i}_${String(s).replace(/[^a-zA-Z0-9]/g, "_")}`;
+    const list = supplierMap[s] || [];
+    const ordered = list.reduce((a, r) => a + Number(r.ordered_qty || 0), 0);
+    const received = list.reduce((a, r) => a + Number(r.received_qty || 0), 0);
+    const pending = list.reduce((a, r) => a + Number(r.pending_qty || 0), 0);
+    const recPct = ordered ? ((received * 100) / ordered).toFixed(2) : "0.00";
+
+    body += `
+      <tr class="so-group-row" data-toggle="so" data-target="${esc(key)}" style="cursor:pointer;background:#f8fafc;">
+        <td style="font-weight:900;"><span data-icon>▸</span> ${esc(s)}</td>
+        <td>${badge(pending <= 0 ? "Completed" : "In Progress")}</td>
+        <td style="text-align:right;">${_n0(ordered)}</td>
+        <td style="text-align:right;">${_n0(received)}</td>
+        <td style="text-align:right;">${_n0(pending)}</td>
+        <td style="text-align:right;">${recPct}%</td>
+        <td style="text-align:right;">${(100 - Number(recPct)).toFixed(2)}%</td>
+      </tr>
+    `;
+
+    list.forEach((r) => {
+      body += `
+        <tr data-panel="${esc(key)}" style="display:none;">
+          <td>${r.purchase_order ? docLink("Purchase Order", r.purchase_order) : `<span class="text-muted">Not Created</span>`}</td>
+          <td>${badge(r.status)}</td>
+          <td style="text-align:right;">${_n0(r.ordered_qty)}</td>
+          <td style="text-align:right;">${_n0(r.received_qty)}</td>
+          <td style="text-align:right;">${_n0(r.pending_qty)}</td>
+          <td style="text-align:right;">${esc(r.received_pct || 0)}%</td>
+          <td style="text-align:right;">${esc(r.pending_pct || 0)}%</td>
+        </tr>
+      `;
+    });
+  });
+
+  return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;">
+    <thead><tr>
+      <th>Supplier / Purchase Order</th><th>Status</th>
+      <th style="text-align:right;">Ordered Qty</th>
+      <th style="text-align:right;">Received Qty</th>
+      <th style="text-align:right;">Pending Qty</th>
+      <th style="text-align:right;">Received %</th>
+      <th style="text-align:right;">Pending %</th>
+    </tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`;
+}
+
+function materialShortageTable(rows){
+  rows = rows || [];
+  if(!rows.length){
+    return `<div class="text-muted">No grouped shortage found.</div>`;
+  }
+
+  const groupMap = {};
+  rows.forEach((r) => {
+    const g = r.item_group || "Uncategorized";
+    if (!groupMap[g]) groupMap[g] = [];
+    groupMap[g].push(r);
+  });
+
+  const groups = Object.keys(groupMap).sort();
+  let body = "";
+
+  groups.forEach((g, i) => {
+    const key = `ms_group_${i}_${String(g).replace(/[^a-zA-Z0-9]/g, "_")}`;
+    const list = groupMap[g] || [];
+    const req = list.reduce((a, r) => a + Number(r.required_qty || 0), 0);
+    const stk = list.reduce((a, r) => a + Number(r.stock_qty || 0), 0);
+    const sht = list.reduce((a, r) => a + Number(r.shortage_qty || 0), 0);
+    const wst = list.reduce((a, r) => a + Number(r.wastage_qty || 0), 0);
+    const suggested = sht + wst;
+    const poq = list.reduce((a, r) => a + Number(r.po_qty || 0), 0);
+    const wpo = list.reduce((a, r) => a + ((Number(r.po_qty || 0) * Number(r.wastage_pct || 0)) / 100), 0);
+    const prq = list.reduce((a, r) => a + Number(r.pr_qty || 0), 0);
+    const ppq = list.reduce((a, r) => a + Number(r.pending_po_qty || 0), 0);
+
+    body += `
+      <tr class="so-group-row" data-toggle="so" data-target="${esc(key)}" style="cursor:pointer;background:#f8fafc;">
+        <td style="font-weight:900;width:13%;min-width:140px;"><span data-icon>▸</span> ${esc(g)}</td>
+        <td style="text-align:right;">-</td>
+        <td style="text-align:right;">${_n0(req)}</td>
+        <td style="text-align:right;">${_n0(wst)}</td>
+        <td style="text-align:right;background:#f1f5f9;">${_n0(stk)}</td>
+        <td style="text-align:right;" class="${sht>0?'so-danger':'so-success'}">${_n0(sht)}</td>
+        <td style="text-align:right;">${_n0(suggested)}</td>
+        <td style="text-align:right;">${_n0(poq)}</td>
+        <td style="text-align:right;">${_n0(wpo)}</td>
+        <td style="text-align:right;">${_n0(prq)}</td>
+        <td style="text-align:right;" class="${ppq>0?'so-warning':'so-success'}">${_n0(ppq)}</td>
+        <td></td>
+      </tr>
+    `;
+
+    list.forEach((r) => {
+      const shortageQty = Number(r.shortage_qty || 0);
+      const suggestedQty = shortageQty + Number(r.wastage_qty || 0);
+      body += `
+        <tr data-panel="${esc(key)}" style="display:none;">
+          <td style="padding-left:26px;width:13%;min-width:140px;">${esc(r.item_code || "")}</td>
+          <td style="text-align:right;">${(Number(r.qty_per_bom || 0)).toFixed(2)}</td>
+          <td style="text-align:right;">${_n0(r.required_qty)}</td>
+          <td style="text-align:right;">${_n0(r.wastage_qty || 0)}</td>
+          <td style="text-align:right;background:#f1f5f9;">${_n0(r.stock_qty)}</td>
+          <td style="text-align:right;" class="${Number(r.shortage_qty||0)>0?'so-danger':'so-success'}">${_n0(r.shortage_qty)}</td>
+          <td style="text-align:right;">${_n0((Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0)))}</td>
+          <td style="text-align:right;">${_n0(r.po_qty)}</td>
+          <td style="text-align:right;">${_n0((Number(r.po_qty || 0) * Number(r.wastage_pct || 0)) / 100)}</td>
+          <td style="text-align:right;">${_n0(r.pr_qty)}</td>
+          <td style="text-align:right;" class="${Number(r.pending_po_qty||0)>0?'so-warning':'so-success'}">${_n0(r.pending_po_qty)}</td>
+          <td>
+            ${suggestedQty > 0 ? `<button class="btn btn-xs btn-primary" data-ms-create-po="1" data-item="${esc(r.item_code || "")}" data-qty="${esc(shortageQty)}" data-description="${esc(r.item_code || "")}" data-wp="${esc(r.wastage_pct || 0)}" data-wq="${esc(r.wastage_qty || 0)}">${__("Create PO")}</button>` : `<span class="text-muted">-</span>`}
+          </td>
+        </tr>
+      `;
+    });
+  });
+
+  return `<div class="table-responsive">
+    <table class="table table-bordered so-table" style="margin:0;">
+      <thead>
+        <tr>
+          <th style="width:13%;min-width:140px;">Item Group / Raw Material</th>
+          <th style="width:120px;text-align:right;">Qty/BOM</th>
+          <th style="width:130px;text-align:right;">Required</th>
+          <th style="width:130px;text-align:right;">Wastage on BOM</th>
+          <th style="width:100px;text-align:right;">Stock</th>
+          <th style="width:120px;text-align:right;">Shortage</th>
+          <th style="width:130px;text-align:right;">Suggested Qty</th>
+          <th style="width:100px;text-align:right;">PO Qty</th>
+          <th style="width:130px;text-align:right;">Wastage on PO</th>
+          <th style="width:100px;text-align:right;">PR Qty</th>
+          <th style="width:130px;text-align:right;">Pending PO Qty</th>
+          <th style="width:120px;">Create PO</th>
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>
+  </div>`;
+}
+
+function poAnalyticsSection(data){
+  const d = data || {};
+  return `
+    ${poAnalyticsOverviewCard(d.overview || {})}
+    <div style="margin-top:12px;font-weight:900;">Item Group-Wise PO Status</div>
+    ${poItemGroupTable(d.item_group_rows || [])}
+    <div style="margin-top:12px;font-weight:900;">PO-Wise Detail Status</div>
+    ${poStatusDetailTable(d.po_status_rows || [])}
+  `;
+}
+
+function buildDashboard(frm, data){
+  const totals = data.production_totals || {};
+  const poTotal = poTotalAmount(data.po_item_group_summary || []);
+  return `
+    ${css()}
+    <div class="so-hdr">
+      <div class="so-title">Sales Order Connection Report</div>
+      <div class="so-sub">Sales Order: <b>${esc(frm.doc.name)}</b></div>
+      ${kpis(totals)}
+    </div>
+
+    ${sectionBlock('profit', 'Profit and Loss Section', 'linear-gradient(90deg,#0f766e,#14b8a6)', `
+      ${card("Profit Dashboard", "Estimated cost from default BOM and sales amount", `
+        ${profitSummaryCard(data.profit_summary || {})}
+        <div style="margin-top:12px;font-weight:900;">Profit by Item</div>
+        ${profitByItemTable(data.profit_by_item || [])}
+      `)}
+      ${card("Purchase Order Total Amount", "Total amount of Purchase Orders linked with this Sales Order", `<div class="so-mini-card"><div class="so-mini-title">TOTAL PO AMOUNT</div><div class="so-mini-val" style="font-size:26px;">${_money0(poTotal)}</div></div>`)}
+      ${card("PO Amount by Item Group", "Purchase Order amount summary linked with this Sales Order", profitGroupPurchaseTable(data.po_item_group_summary || []))}
+      ${card("Employee Item-wise Labour Cost", "From per-piece-report > Employee item-wise", labourCostTable(data.labour_cost_employee_item_wise || [], data.labour_cost_summary || {}))}
+    `, false)}
+
+    ${sectionBlock('purchase', 'Purchase Order Section', 'linear-gradient(90deg,#7c3aed,#9333ea)', `
+      ${card("PO Analytics (From PO Tab)", "Item Group-Wise PO Status", `${poAnalyticsOverviewCard((data.custom_po_analytics || {}).overview || {})}${poItemGroupTable((data.custom_po_analytics || {}).item_group_rows || [])}`)}
+      ${card("Material Shortage & Purchase Suggestion", "Grouped by Item Group with PO and PR planning progress", materialShortageTable(data.material_shortage || []))}
+      ${card("PO-Wise status Report", "Collapsed by Supplier", poStatusDetailTable((data.custom_po_analytics || {}).po_status_rows || []))}
+      ${card("Purchase Flow Tracker", "PO + Purchase Receipt + Purchase Invoice in one row with PO cost", purchaseFlowTable(data.purchase_flow_rows || []))}
+    `, false)}
+
+    ${sectionBlock('production', 'Production Section', 'linear-gradient(90deg,#7a3e00,#a16207)', `
+      ${card("Production", "Production Plan -> Work Order -> Job Cards / Operations / Employees / Materials", productionTree(data.production_tree||[]))}
+      ${card("Production Timeline", "Work Orders, Delivery Notes and Invoices timeline", timelineView(data.gantt_timeline || []))}
+      ${card("Machine Utilization", "Workstation time from Job Card Time Logs", machineUtilization(data.machine_utilization || []))}
+      ${card("Employee Efficiency", "Completed quantity vs time spent", employeeEfficiency(data.employee_efficiency || []))}
+    `, false)}
+
+    ${sectionBlock('bom', 'BOM and Raw Material Section', 'linear-gradient(90deg,#0891b2,#06b6d4)', `
+      ${card("BOM & Raw Materials", "Item and BOM merged for easier reading", bomTree(data.bom_tree||[]))}
+    `, false)}
+
+    ${sectionBlock('dispatch', 'Dispatch Section', 'linear-gradient(90deg,#ea580c,#f97316)', `
+      ${card("Order Item Summary", "Ordered, delivered, invoiced and pending quantity by item", orderItemSummaryTable(data.order_item_summary || []))}
+      ${card("Delivery & Billing", "Delivery Note -> Invoices, click document number for popup detail", deliveryHierarchy(data.sales_fulfillment_hierarchy||[]))}
+      ${card("Delivery Risk Prediction", "Delivery delay warning based on completion and delivery date", deliveryPredictionCard(data.delivery_prediction || {}))}
+    `, false)}
+  `;
+}
 
 frappe.ui.form.on("Item PO", {
   item(frm, cdt, cdn) {
@@ -1779,6 +2996,23 @@ frappe.ui.form.on("Sales Order", {
       !frm.doc.custom_account_title
     ) {
       fill_bank_fields(frm, frm.doc.custom_bank_account);
+    }
+  },
+});
+
+frappe.ui.form.on("Sales Order", {
+  custom_wastage_mode(frm) {
+    if (frm.doc.__islocal) return;
+    frm.refresh_field("custom_wastages");
+    if (frm.doc.docstatus === 1) {
+      frm.dashboard && frm.dashboard.clear_headline && frm.dashboard.clear_headline();
+      setTimeout(() => frm.events && frm.events.refresh && frm.events.refresh(frm), 50);
+    }
+  },
+  custom_manual_wastage_percent(frm) {
+    if (frm.doc.__islocal) return;
+    if (frm.doc.docstatus === 1) {
+      setTimeout(() => frm.events && frm.events.refresh && frm.events.refresh(frm), 50);
     }
   },
 });

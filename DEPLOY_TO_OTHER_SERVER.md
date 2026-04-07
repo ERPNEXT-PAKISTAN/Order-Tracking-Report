@@ -2,10 +2,17 @@
 
 This app includes:
 - Sales Order custom fields
-- Client Script (`Sales Order Detail Status`)
-- Server Script (`Sales Order Detail Status`, `create_po_from_sales_order_po_tab`)
+- App JS (`public/js/sales_order.js`)
+- Data Entry app JS for:
+  - Sales Order
+  - Sales Invoice
+  - Purchase Order
+  - Purchase Receipt
+  - Purchase Invoice
+  - Stock Entry
+- App API (`api.py`) and backend services
 - Print Format (`Sales Order Contract`)
-- Report and Property Setters exported as fixtures
+- Report and Property Setters
 
 ## 1) Upload This App to GitHub
 
@@ -53,7 +60,19 @@ bench restart
 
 ## 4) If App Already Exists on Other Server
 
-To update to latest code:
+If `git pull origin main` fails with:
+`fatal: 'origin' does not appear to be a git repository`
+run one-time remote setup:
+
+```bash
+cd /home/frappe/frappe-bench-v16/apps/order_tracking_report
+git init
+git remote add origin https://github.com/ERPNEXT-PAKISTAN/Order-Tracking-Report.git
+git fetch origin
+git checkout -B main origin/main
+```
+
+Then regular update:
 
 ```bash
 cd /home/frappe/frappe-bench-v16/apps/order_tracking_report
@@ -64,7 +83,12 @@ bench --site <your-site-name> clear-cache
 bench restart
 ```
 
+Important:
+- Use the bench path where this app is installed.
+- If your app path is `/home/frappe/frappe-bench/apps/order_tracking_report`, run commands from `/home/frappe/frappe-bench`.
+
 ## Notes
 
 - Fixtures are already exported in app code, so `migrate` applies customizations.
+- `after_migrate` hooks ensure required child tables (like `Item PO` and `Wastage`) and remove legacy UI scripts (`Client Script` / `Server Script`) that were moved to backend app code.
 - Recent fix included: PR Qty in `Material Shortage & Purchase Suggestion` now uses submitted `Purchase Receipt Item` quantities for partial receipts.
