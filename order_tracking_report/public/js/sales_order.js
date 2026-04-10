@@ -1916,6 +1916,11 @@ function open_po_item_data_entry(frm, prefill) {
       frappe.msgprint(__("Add at least one row."));
       return;
     }
+    const missingSupplier = items_data.filter((r) => !(r.supplier || "").trim());
+    if (missingSupplier.length) {
+      frappe.msgprint(__("Supplier is required for all rows before insert."));
+      return;
+    }
     items_data.forEach((r) => {
       const row = frm.add_child("custom_po_item");
       row.item = r.item_code;
@@ -2151,7 +2156,7 @@ function open_po_item_data_entry(frm, prefill) {
     if (item_group) filters.item_group = item_group;
     const r = await frappe.call({
       method: "frappe.client.get_list",
-      args: { doctype: "Item", fields: ["name", "item_name", "description", "default_warehouse", "last_purchase_rate"], filters, order_by: "name asc", limit_page_length: 500 },
+      args: { doctype: "Item", fields: ["name", "item_name", "description", "last_purchase_rate"], filters, order_by: "name asc", limit_page_length: 500 },
     });
     const rows = (r && r.message) ? r.message : [];
     item_map = {};
@@ -2261,7 +2266,6 @@ function open_po_item_data_entry(frm, prefill) {
     if (!code) return;
     const item_meta = item_map[code] || {};
     if (!dialog.get_value("descriptions") && item_meta.description) dialog.set_value("descriptions", stripHtml(item_meta.description));
-    if (!dialog.get_value("warehouse") && item_meta.default_warehouse) dialog.set_value("warehouse", item_meta.default_warehouse);
     if (!toNum(dialog.get_value("rate")) && toNum(item_meta.last_purchase_rate)) dialog.set_value("rate", toNum(item_meta.last_purchase_rate));
     if (!toNum(dialog.get_value("rate"))) {
       frappe.call({
@@ -2374,6 +2378,8 @@ function open_po_item_data_entry(frm, prefill) {
     render_meta();
     if (prefill && typeof prefill === "object") {
       if (Array.isArray(prefill.rows) && prefill.rows.length) {
+        const firstSupplier = (prefill.rows.find((r) => r && r.supplier) || {}).supplier;
+        if (firstSupplier && !dialog.get_value("supplier")) dialog.set_value("supplier", firstSupplier);
         prefill.rows.forEach((row) => {
           const baseQty = toNum(row.base_qty || row.qty || 0);
           const wp = toNum(row.custom_wastage_percentage || row.wastage_pct || 0);
@@ -3106,6 +3112,52 @@ function manufacturingControlCenter(frm, data){
 }
 
 function bindDashboardActionButtons($wrap, frm){
+  const openActionCenterForItem = (item) => {
+    const d = new frappe.ui.Dialog({
+      title: __("Action Center"),
+      size: "large",
+      fields: [{ fieldtype: "HTML", fieldname: "body" }],
+    });
+    d.fields_dict.body.$wrapper.html(`
+      <div style="margin-bottom:10px;padding:8px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;">
+        <b>${__("Sales Order")}:</b> ${esc(frm.doc.name)} &nbsp; | &nbsp; <b>${__("Item")}:</b> ${esc(item || "-")}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;">
+        <button class="btn btn-sm btn-info" data-ac="pp">${__("Create Production Plan")}</button>
+        <button class="btn btn-sm btn-dark" data-ac="wo">${__("Create Work Order")}</button>
+        <button class="btn btn-sm btn-warning" data-ac="mt">${__("Material Transfer")}</button>
+        <button class="btn btn-sm btn-primary" data-ac="mfg">${__("Manufacture Entry")}</button>
+        <button class="btn btn-sm btn-success" data-ac="dn">${__("Create Delivery Note")}</button>
+        <button class="btn btn-sm btn-secondary" data-ac="jc">${__("Open Job Cards")}</button>
+      </div>
+    `);
+    const $w = d.fields_dict.body.$wrapper;
+    $w.find("[data-ac]").on("click", function(e){
+      e.preventDefault();
+      const a = $(this).attr("data-ac");
+      if (a === "pp") {
+        frappe.route_options = { get_items_from: "Sales Order", sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
+        frappe.new_doc("Production Plan");
+      } else if (a === "wo") {
+        frappe.route_options = { sales_order: frm.doc.name, production_item: item, company: frm.doc.company };
+        frappe.new_doc("Work Order");
+      } else if (a === "mt") {
+        frappe.route_options = { stock_entry_type: "Material Transfer for Manufacture", sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
+        frappe.new_doc("Stock Entry");
+      } else if (a === "mfg") {
+        frappe.route_options = { stock_entry_type: "Manufacture", sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
+        frappe.new_doc("Stock Entry");
+      } else if (a === "dn") {
+        frappe.route_options = { against_sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
+        frappe.new_doc("Delivery Note");
+      } else if (a === "jc") {
+        frappe.set_route("List", "Job Card", { sales_order: frm.doc.name });
+      }
+      d.hide();
+    });
+    d.show();
+  };
+
   const openNew = (doctype, routeOptions) => {
     frappe.route_options = routeOptions || {};
     frappe.new_doc(doctype);
@@ -3147,7 +3199,7 @@ function bindDashboardActionButtons($wrap, frm){
       frappe.route_options = { against_sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
       frappe.new_doc("Delivery Note");
     } else if (action === "view") {
-      frappe.show_alert({ message: __("Use Production Details table below for linked docs of item: {0}", [item || "-"]), indicator: "blue" }, 5);
+      openActionCenterForItem(item);
     }
   });
 }
@@ -3187,7 +3239,7 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
       qty: defaultQty,
       descriptions: description || item,
       select_for_po: 1,
-      supplier: d.supplier || "",
+      supplier: d.supplier || ml.last_supplier || "",
       warehouse: d.warehouse || "",
       rate: Number(d.rate || ml.last_purchase_rate || 0),
       custom_wastage_percentage: wp || Number(d.custom_wastage_percentage || 0),
@@ -3219,6 +3271,7 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
       custom_wastage_qty: Number(r.wastage_qty || 0),
       po_qty: Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0),
       rate: Number(r.last_purchase_rate || 0),
+      supplier: (itemDefaults[r.item_code || ""] || {}).supplier || r.last_supplier || "",
       descriptions: r.item_code || "",
       select_for_po: 1,
     })).filter((r) => r.item_code && (Number(r.qty || 0) > 0 || Number(r.po_qty || 0) > 0));
