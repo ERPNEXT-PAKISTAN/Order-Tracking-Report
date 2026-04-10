@@ -383,19 +383,37 @@ function kpis(t){
   </div>`;
 }
 
-function jobCardTable(rows){
+function jobCardTable(rows, itemCode){
   rows = rows || [];
+  const actionButtons = (row) => {
+    const status = String(row.status || "").toLowerCase();
+    const itemAttr = esc(itemCode || row.production_item || "");
+    const nameAttr = esc(row.name || "");
+    let buttons = `<button class="btn btn-xs btn-default" data-jc-action="manage" data-job-card="${nameAttr}" data-item="${itemAttr}">Manage</button>`;
+    if (status === "open" || status === "material transferred") {
+      buttons = `<button class="btn btn-xs btn-success" data-jc-action="start" data-job-card="${nameAttr}" data-item="${itemAttr}">Start Job</button>${buttons}`;
+    }
+    if (status === "work in progress") {
+      buttons = `
+        <button class="btn btn-xs btn-warning" data-jc-action="pause" data-job-card="${nameAttr}" data-item="${itemAttr}">Pause Job</button>
+        <button class="btn btn-xs btn-primary" data-jc-action="complete" data-job-card="${nameAttr}" data-item="${itemAttr}">Complete Job</button>
+        ${buttons}
+      `;
+    }
+    return `<div style="display:flex;gap:6px;flex-wrap:wrap;">${buttons}</div>`;
+  };
   const body = rows.length ? rows.map(r => `
     <tr>
       <td>${docLink("Job Card", r.name)}</td>
       <td>${badge(r.status)}</td>
       <td class="muted">${esc(r.operation||"")}</td>
       <td class="muted">${esc(r.workstation||"")}</td>
+      <td>${actionButtons(r)}</td>
     </tr>
-  `).join("") : `<tr><td colspan="4" class="text-muted">No Job Cards.</td></tr>`;
+  `).join("") : `<tr><td colspan="5" class="text-muted">No Job Cards.</td></tr>`;
   return `<div class="table-responsive">
     <table class="table table-bordered so-table" style="margin:0;">
-      <thead><tr><th style="width:220px;">Job Card</th><th style="width:140px;">Status</th><th>Operation</th><th>Workstation</th></tr></thead>
+      <thead><tr><th style="width:220px;">Job Card</th><th style="width:140px;">Status</th><th>Operation</th><th>Workstation</th><th style="width:280px;">Actions</th></tr></thead>
       <tbody>${body}</tbody>
     </table>
   </div>`;
@@ -573,7 +591,7 @@ function productionTree(tree){
               <button class="btn btn-xs btn-warning" data-plan-action="mt" data-item="${esc(wo.production_item || "")}">Material Transfer</button>
               <button class="btn btn-xs btn-primary" data-plan-action="mfg" data-item="${esc(wo.production_item || "")}">Manufacture</button>
               <button class="btn btn-xs btn-success" data-plan-action="dn" data-item="${esc(wo.production_item || "")}">Delivery Note</button>
-              <button class="btn btn-xs btn-default" data-plan-action="view" data-item="${esc(wo.production_item || "")}">View</button>
+              <button class="btn btn-xs btn-default" data-plan-action="view" data-item="${esc(wo.production_item || "")}">Manage Docs</button>
             </div>
           </div>
           <div style="text-align:right;min-width:230px;">
@@ -590,7 +608,7 @@ function productionTree(tree){
       woh += panel(`
         ${top}
         <div style="margin-top:12px;font-weight:900;">Job Cards</div>
-        ${jobCardTable(wo.job_cards||[])}
+        ${jobCardTable(wo.job_cards||[], wo.production_item || "")}
         <div style="margin-top:12px;font-weight:900;">Operations</div>
         ${operationTable(wo.operations||[])}
         <div style="margin-top:12px;font-weight:900;">Work Order Items (Materials)</div>
@@ -1032,6 +1050,99 @@ function buildAllRelatedLinksHtml(frm, data) {
     <div style="display:grid;gap:14px;">
       <div style="padding:12px 14px;border:1px solid #bfdbfe;border-radius:14px;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:700;">
         ${__("Open any related document in a new tab.")}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;">
+        ${sections}
+      </div>
+    </div>
+  `;
+}
+
+function openPlanningItemLinksDialog(frm, data, itemCode) {
+  const code = String(itemCode || "").trim();
+  const html = buildPlanningItemLinksHtml(frm, data, code);
+  const dialog = new frappe.ui.Dialog({
+    title: code ? __("Related Links: {0}", [code]) : __("Related Links"),
+    size: "extra-large",
+    fields: [{ fieldtype: "HTML", fieldname: "content" }],
+  });
+  dialog.fields_dict.content.$wrapper.html(html);
+  dialog.show();
+}
+
+function buildPlanningItemLinksHtml(frm, data, itemCode) {
+  const code = String(itemCode || "").trim();
+  const itemLabel = code || frm.doc.name;
+  const planningRows = _planningRows(data || {});
+  const planningRow = planningRows.find((row) => String(row.item_code || "").trim() === code)
+    || planningRows.find((row) => String(row.item_name || "").trim() === code)
+    || null;
+  const groups = {
+    "Sales Order": [frm.doc.name],
+    "Production Plan": [],
+    "Work Order": [],
+    "Job Card": [],
+    "Purchase Order": [],
+    "Purchase Receipt": [],
+    "Purchase Invoice": [],
+    "Delivery Note": [],
+    "Sales Invoice": [],
+  };
+
+  const pushDoc = (doctype, value) => {
+    if (!doctype || !value || !groups[doctype]) return;
+    groups[doctype].push(value);
+  };
+
+  if (planningRow) {
+    (planningRow.pp_list || []).forEach((name) => pushDoc("Production Plan", name));
+    (planningRow.wo_list || []).forEach((name) => pushDoc("Work Order", name));
+    (planningRow.jc_list || []).forEach((name) => pushDoc("Job Card", name));
+  }
+
+  // Procurement/dispatch rows are tracked at Sales Order level in the backend payload.
+  // Show the complete order-level document flow here so PO/PR/PI/DN/SI links are never hidden.
+  (data.procurement || []).forEach((row) => {
+    if (row && row.doctype && row.name) {
+      pushDoc(row.doctype, row.name);
+    }
+  });
+
+  (data.custom_po_tracking || []).forEach((row) => {
+    if (row && row.name) {
+      pushDoc("Purchase Order", row.name);
+    }
+  });
+
+  (data.purchase_flow_rows || []).forEach((row) => {
+    pushDoc("Purchase Order", row.purchase_order);
+    splitDocNames(row.purchase_receipts).forEach((name) => pushDoc("Purchase Receipt", name));
+    splitDocNames(row.purchase_invoices).forEach((name) => pushDoc("Purchase Invoice", name));
+  });
+
+  (data.sales_fulfillment_hierarchy || []).forEach((row) => {
+    pushDoc("Delivery Note", row.delivery_note);
+    (row.invoices || []).forEach((invoice) => {
+      if (invoice && invoice.name) pushDoc("Sales Invoice", invoice.name);
+    });
+  });
+
+  const sections = Object.keys(groups).map((doctype) => {
+    const values = [...new Set((groups[doctype] || []).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+    return `
+      <div style="border:1px solid #dbe4f0;border-radius:16px;padding:14px;background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);min-height:156px;">
+        <div style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.04em;">${esc(doctype)}</div>
+        <div style="margin-top:8px;font-size:24px;font-weight:900;color:#0f172a;line-height:1;">${values.length}</div>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">${values.length ? values.map((name) => relatedDocChip(doctype, name)).join("") : `<span style="font-size:12px;color:#64748b;">${__("No linked documents")}</span>`}</div>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div style="display:grid;gap:14px;">
+      <div style="padding:14px 16px;border:1px solid #bfdbfe;border-radius:16px;background:linear-gradient(90deg,#eff6ff,#f8fbff);">
+        <div style="font-size:18px;font-weight:900;color:#0f172a;">${esc(itemLabel)}</div>
+        <div style="margin-top:4px;font-size:12px;color:#1d4ed8;font-weight:700;">${__("Production links are filtered to this item. Procurement and dispatch links are shown from the full Sales Order flow so no connected document is missed.")}</div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;">
         ${sections}
@@ -2921,7 +3032,7 @@ function salesOrderItemsPlanningTable(data){
           <button class="btn btn-xs btn-warning" data-plan-action="mt" data-item="${esc(r.item_code)}">MT</button>
           <button class="btn btn-xs btn-secondary" data-plan-action="mfg" data-item="${esc(r.item_code)}">MFG</button>
           <button class="btn btn-xs btn-success" data-plan-action="dn" data-item="${esc(r.item_code)}">DN</button>
-          <button class="btn btn-xs btn-default" data-plan-action="view" data-item="${esc(r.item_code)}">View</button>
+          <button class="btn btn-xs btn-primary" data-plan-action="links" data-item="${esc(r.item_code)}">Links</button>
         </td>
       </tr>
     `;
@@ -2952,6 +3063,10 @@ function manufacturingControlCenter(frm, data){
         <div style="margin-top:10px;padding:10px;border:1px solid #bfdbfe;border-radius:10px;background:#eff6ff;color:#1d4ed8;font-weight:700;">
           Recommended flow: Sales Order -> Production Plan -> Submit Plan -> Create/Submit Work Order -> Material Transfer -> Start/Pause/Complete Job Cards -> Manufacture/Return Material.
         </div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <button class="btn btn-sm btn-primary" data-so-action="show_all_links">${__("Links")}</button>
+          <span class="muted" style="font-size:12px;">${__("Open all linked Sales Order documents in one view.")}</span>
+        </div>
         <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:10px;">
           <div class="so-mini-card">
             <div class="so-mini-title" style="font-size:11px;">WORK ORDERS</div>
@@ -2976,7 +3091,7 @@ function manufacturingControlCenter(frm, data){
             <div class="so-mini-val" style="font-size:14px;">${_n0((data.order_item_summary || []).reduce((a, r) => a + Number(r.delivered_qty || 0), 0))}</div>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px;">
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:12px;">
           <button class="btn btn-sm btn-success" data-so-action="create_sales_order">Create Sales Order</button>
           <button class="btn btn-sm btn-info" data-so-action="create_production_plan">Create Production Plan</button>
           <button class="btn btn-sm btn-dark" data-so-action="create_work_order">Create Work Order</button>
@@ -2985,20 +3100,42 @@ function manufacturingControlCenter(frm, data){
           <button class="btn btn-sm btn-primary" data-so-action="create_manufacture_entry">Manufacture Entry</button>
           <button class="btn btn-sm btn-success" data-so-action="create_delivery_note">Create Delivery Note</button>
           <button class="btn btn-sm btn-secondary" data-so-action="return_disassemble">Return / Disassemble</button>
+          <button class="btn btn-sm btn-default" data-so-action="so_status_board">SO Status Board</button>
+          <button class="btn btn-sm btn-default" data-so-action="open_current_docs">Open Current Documents</button>
         </div>
       </div>
     </div>
   `;
 }
 
-function bindDashboardActionButtons($wrap, frm){
+function bindDashboardActionButtons($wrap, frm, data){
+  const planningRows = _planningRows(data || {});
   const primaryItem = (() => {
     const rows = frm.doc.items || [];
     if (!rows.length) return "";
     return (rows[0].item_code || rows[0].item_name || "").trim();
   })();
 
-  const getPendingSoItems = async () => {
+  const buildSeedForItem = (selectedItem) => {
+    const itemCode = String(selectedItem || primaryItem || "").trim();
+    const planRow = planningRows.find((row) => String(row.item_code || "").trim() === itemCode)
+      || planningRows.find((row) => String(row.item_name || "").trim() === itemCode)
+      || {};
+    const firstPointer = _firstProductionPointers(data || {});
+    return {
+      company: frm.doc.company || "",
+      sales_order: frm.doc.name || "",
+      customer: frm.doc.customer || "",
+      item_code: itemCode || "",
+      production_plan: (planRow.pp_list || [])[0] || firstPointer.pp || "",
+      work_order: (planRow.wo_list || [])[0] || firstPointer.wo || "",
+      job_card: (planRow.jc_list || [])[0] || "",
+      qty: Math.max(Number((frm.doc.items || []).find((row) => String(row.item_code || "").trim() === itemCode)?.qty || 0), 1),
+    };
+  };
+
+  const getPendingSoItems = async (selectedItem) => {
+    const filterItem = String(selectedItem || "").trim();
     const rows = (frm.doc.items || []).map((r) => {
       const pending = Number(r.qty || 0) - Number(r.delivered_qty || 0);
       return {
@@ -3008,7 +3145,7 @@ function bindDashboardActionButtons($wrap, frm){
         stock_uom: r.uom || r.stock_uom || "",
         sales_order_item: r.name || "",
       };
-    }).filter((r) => r.item_code);
+    }).filter((r) => r.item_code && (!filterItem || r.item_code === filterItem));
     const withBom = await Promise.all(rows.map(async (r) => {
       let bom = "";
       try {
@@ -3040,6 +3177,111 @@ function bindDashboardActionButtons($wrap, frm){
       freeze_message: __("Submitting..."),
     });
     return (r && r.message) || doc;
+  };
+
+  const getDoc = async (doctype, name) => {
+    const r = await frappe.call({
+      method: "frappe.client.get",
+      args: { doctype, name },
+    });
+    return (r && r.message) || null;
+  };
+
+  const getDocList = async (doctype, filters, fields, limit) => {
+    const r = await frappe.call({
+      method: "frappe.client.get_list",
+      args: {
+        doctype,
+        filters: filters || {},
+        fields: fields || ["name"],
+        limit_page_length: limit || 50,
+        order_by: "modified desc",
+      },
+    });
+    return (r && r.message) || [];
+  };
+
+  const submitExistingDoc = async (doctype, name) => {
+    const doc = await getDoc(doctype, name);
+    if (!doc) throw new Error(__("{0} not found", [name]));
+    return submitDoc(doc);
+  };
+
+  const openJobCardControlDialog = async (mode, jobCardName) => {
+    const jc = await getDoc("Job Card", jobCardName);
+    if (!jc) {
+      frappe.show_alert({ message: __("Job Card not found."), indicator: "orange" }, 4);
+      return;
+    }
+
+    const isStart = mode === "start";
+    const isPause = mode === "pause";
+    const isComplete = mode === "complete";
+    const remainingQty = Math.max(Number(jc.for_quantity || 0) - Number(jc.total_completed_qty || 0), 0);
+    const dialog = new frappe.ui.Dialog({
+      title: isStart ? __("Start Job") : isPause ? __("Pause Job") : __("Complete Job"),
+      fields: [
+        { fieldtype: "HTML", fieldname: "info_html" },
+        { fieldtype: "Section Break" },
+        {
+          fieldtype: "MultiSelectPills",
+          fieldname: "employees",
+          label: __("Employees"),
+          reqd: 1,
+          get_data: function(txt) {
+            return frappe.db.get_link_options("Employee", txt || "");
+          },
+        },
+        { fieldtype: "Datetime", fieldname: "from_time", label: __("From Time"), default: frappe.datetime.now_datetime(), reqd: 1 },
+        { fieldtype: "Datetime", fieldname: "to_time", label: __("To Time"), default: frappe.datetime.now_datetime(), reqd: isStart ? 0 : 1 },
+        { fieldtype: "Float", fieldname: "completed_qty", label: __("Completed Qty"), default: isComplete ? remainingQty : 0, reqd: isStart ? 0 : 1 },
+      ],
+      primary_action_label: isStart ? __("Start Job") : isPause ? __("Pause Job") : __("Complete Job"),
+      primary_action: async (values) => {
+        const employees = (values.employees || []).map((row) => {
+          if (typeof row === "string") return row;
+          return row && (row.value || row.label || row.name) || "";
+        }).filter(Boolean);
+        if (!employees.length) {
+          frappe.show_alert({ message: __("Select at least one employee."), indicator: "orange" }, 4);
+          return;
+        }
+        if (!isStart && Number(values.completed_qty || 0) < 0) {
+          frappe.show_alert({ message: __("Completed Qty cannot be negative."), indicator: "orange" }, 4);
+          return;
+        }
+        if (isPause && Number(values.completed_qty || 0) <= 0) {
+          frappe.show_alert({ message: __("Completed Qty must be greater than 0 for Pause Job."), indicator: "orange" }, 4);
+          return;
+        }
+        try {
+          await frappe.call({
+            method: "live_production_api",
+            args: {
+              action: isStart ? "start_job_card" : isPause ? "update_production" : "complete_job_card",
+              job_card: jobCardName,
+              employees: employees.join(","),
+              from_time: values.from_time,
+              to_time: values.to_time,
+              completed_qty: values.completed_qty,
+            },
+            freeze: true,
+            freeze_message: __("Updating Job Card..."),
+          });
+          dialog.hide();
+          frappe.show_alert({ message: __("Job Card updated."), indicator: "green" }, 4);
+          frm.trigger("render_execution_dashboard");
+        } catch (error) {
+          frappe.msgprint(__("Failed: {0}", [error.message || error]));
+        }
+      },
+    });
+    dialog.fields_dict.info_html.$wrapper.html(`
+      <div style="padding:10px;border:1px solid #dbeafe;border-radius:10px;background:#eff6ff;color:#1e3a8a;font-size:12px;">
+        <b>${esc(jc.name || jobCardName)}</b> &nbsp; | &nbsp; ${esc(jc.operation || "-")} &nbsp; | &nbsp; ${__("Qty")}: <b>${soFlt(jc.total_completed_qty || 0)}</b> / <b>${soFlt(jc.for_quantity || 0)}</b>
+      </div>
+    `);
+    dialog.show();
   };
 
   const openSalesOrderCreator = (seed) => {
@@ -3180,7 +3422,7 @@ function bindDashboardActionButtons($wrap, frm){
     `);
     d.fields_dict.load_sales_order_items.$input.on("click", async () => {
       rows.splice(0, rows.length);
-      const soRows = await getPendingSoItems();
+      const soRows = await getPendingSoItems(seed.item_code);
       soRows.forEach((r) => rows.push({
         item_code: r.item_code,
         bom_no: r.bom_no || "",
@@ -3280,7 +3522,7 @@ function bindDashboardActionButtons($wrap, frm){
     `);
     d.fields_dict.load_sales_order_items.$input.on("click", async () => {
       rows.splice(0, rows.length);
-      const soRows = await getPendingSoItems();
+      const soRows = await getPendingSoItems(seed.item_code);
       soRows.forEach((r) => rows.push({
         item_code: r.item_code,
         bom_no: r.bom_no || "",
@@ -3387,22 +3629,183 @@ function bindDashboardActionButtons($wrap, frm){
   const openExistingDocsDialog = (seed) => {
     const d = new frappe.ui.Dialog({
       title: __("Manage Existing Docs"),
+      size: "extra-large",
       fields: [{ fieldtype: "HTML", fieldname: "body" }],
     });
+    d.fields_dict.body.$wrapper.html(`<div style="padding:12px;color:#64748b;">${__("Loading current documents...")}</div>`);
+    d.show();
+
+    const relevantWorkOrders = [];
+    (data.production_tree || []).forEach((node) => {
+      (node.work_orders || []).forEach((wo) => {
+        if (!seed.item_code || String(wo.production_item || "").trim() === String(seed.item_code || "").trim()) {
+          relevantWorkOrders.push({
+            production_plan: (node.production_plan || {}).name || "",
+            production_plan_status: (node.production_plan || {}).status || "",
+            work_order: wo.name || "",
+            work_order_status: wo.status || "",
+            job_cards: wo.job_cards || [],
+          });
+        }
+      });
+    });
+
+    const ppNames = [...new Set(relevantWorkOrders.map((row) => row.production_plan).filter(Boolean))];
+    const woNames = [...new Set(relevantWorkOrders.map((row) => row.work_order).filter(Boolean))];
+    const jcNames = [...new Set(relevantWorkOrders.flatMap((row) => (row.job_cards || []).map((jc) => jc.name).filter(Boolean)))];
+
+    const ppRows = ppNames.map((name) => ({ name, status: relevantWorkOrders.find((row) => row.production_plan === name)?.production_plan_status || "" }));
+    const woRows = woNames.map((name) => ({ name, status: relevantWorkOrders.find((row) => row.work_order === name)?.work_order_status || "" }));
+    const jcRows = relevantWorkOrders.flatMap((row) => row.job_cards || []);
+
+    const ppHtml = ppRows.length ? `
+      <div style="margin-top:12px;font-weight:900;color:#0f172a;">${__("Production Plans")}</div>
+      <div class="table-responsive" style="margin-top:8px;">
+        <table class="table table-bordered so-table" style="margin:0;">
+          <thead><tr><th>${__("Production Plan")}</th><th>${__("Status")}</th><th style="width:220px;">${__("Actions")}</th></tr></thead>
+          <tbody>
+            ${ppRows.map((row) => `
+              <tr>
+                <td>${docLink("Production Plan", row.name)}</td>
+                <td>${badge(row.status)}</td>
+                <td><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn btn-xs btn-default" data-open-doc="Production Plan" data-docname="${esc(row.name)}">${__("Open")}</button><button class="btn btn-xs btn-primary" data-pp-submit="${esc(row.name)}">${__("Submit")}</button></div></td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>` : "";
+
+    const woHtml = woRows.length ? `
+      <div style="margin-top:12px;font-weight:900;color:#0f172a;">${__("Work Orders")}</div>
+      <div class="table-responsive" style="margin-top:8px;">
+        <table class="table table-bordered so-table" style="margin:0;">
+          <thead><tr><th>${__("Work Order")}</th><th>${__("Status")}</th><th style="width:280px;">${__("Actions")}</th></tr></thead>
+          <tbody>
+            ${woRows.map((row) => `
+              <tr>
+                <td>${docLink("Work Order", row.name)}</td>
+                <td>${badge(row.status)}</td>
+                <td><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn btn-xs btn-default" data-open-doc="Work Order" data-docname="${esc(row.name)}">${__("Open")}</button><button class="btn btn-xs btn-primary" data-wo-submit="${esc(row.name)}">${__("Submit")}</button><button class="btn btn-xs btn-warning" data-wo-next="mt" data-work-order="${esc(row.name)}">${__("Material Transfer")}</button><button class="btn btn-xs btn-success" data-wo-next="mfg" data-work-order="${esc(row.name)}">${__("Manufacture")}</button></div></td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>` : "";
+
+    const jcHtml = jcRows.length ? `
+      <div style="margin-top:12px;font-weight:900;color:#0f172a;">${__("Job Cards")}</div>
+      <div class="table-responsive" style="margin-top:8px;">
+        <table class="table table-bordered so-table" style="margin:0;">
+          <thead><tr><th>${__("Job Card")}</th><th>${__("Status")}</th><th>${__("Operation")}</th><th style="width:320px;">${__("Actions")}</th></tr></thead>
+          <tbody>
+            ${jcRows.map((row) => {
+              const status = String(row.status || "").toLowerCase();
+              return `
+                <tr>
+                  <td>${docLink("Job Card", row.name)}</td>
+                  <td>${badge(row.status)}</td>
+                  <td>${esc(row.operation || "")}</td>
+                  <td><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn btn-xs btn-default" data-open-doc="Job Card" data-docname="${esc(row.name)}">${__("Open")}</button>${status === "open" || status === "material transferred" ? `<button class="btn btn-xs btn-success" data-jc-dialog="start" data-job-card="${esc(row.name)}">${__("Start Job")}</button>` : ""}${status === "work in progress" ? `<button class="btn btn-xs btn-warning" data-jc-dialog="pause" data-job-card="${esc(row.name)}">${__("Pause Job")}</button><button class="btn btn-xs btn-primary" data-jc-dialog="complete" data-job-card="${esc(row.name)}">${__("Complete Job")}</button>` : ""}</div></td>
+                </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>` : "";
+
     d.fields_dict.body.$wrapper.html(`
-      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
-        <button class="btn btn-default" data-open="so">${__("Open Sales Order")}</button>
-        <button class="btn btn-default" data-open="wo">${__("Open Work Orders")}</button>
-        <button class="btn btn-default" data-open="pp">${__("Open Production Plans")}</button>
-        <button class="btn btn-default" data-open="jc">${__("Open Job Cards")}</button>
+      <div style="padding:4px;">
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:12px;">
+          <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;"><div style="font-size:11px;color:#64748b;">${__("Company")}</div><div style="font-weight:800;color:#1e293b;">${esc(seed.company || frm.doc.company || "-")}</div></div>
+          <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;"><div style="font-size:11px;color:#64748b;">${__("Sales Order")}</div><div style="font-weight:800;color:#1e293b;">${esc(seed.sales_order || frm.doc.name || "-")}</div></div>
+          <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;"><div style="font-size:11px;color:#64748b;">${__("Production Plan")}</div><div style="font-weight:800;color:#1e293b;">${esc(seed.production_plan || "-")}</div></div>
+          <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;"><div style="font-size:11px;color:#64748b;">${__("Work Order")}</div><div style="font-weight:800;color:#1e293b;">${esc(seed.work_order || "-")}</div></div>
+          <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;"><div style="font-size:11px;color:#64748b;">${__("Item")}</div><div style="font-weight:800;color:#1e293b;">${esc(seed.item_code || "-")}</div></div>
+        </div>
+        <div style="padding:12px;border:1px solid #dbeafe;border-radius:12px;background:#eff6ff;color:#1d4ed8;font-size:12px;">
+          ${__("Draft Production Plans can be submitted here. Draft Work Orders can be submitted here. Open Job Cards can be started here; Work In Progress Job Cards can be paused or completed.")}
+        </div>
+        ${ppHtml}
+        ${woHtml}
+        ${jcHtml}
       </div>
     `);
-    const $b = d.fields_dict.body.$wrapper;
-    $b.find("[data-open='so']").on("click", () => { d.hide(); frappe.set_route("Form", "Sales Order", frm.doc.name); });
-    $b.find("[data-open='wo']").on("click", () => { d.hide(); frappe.set_route("List", "Work Order", { sales_order: frm.doc.name }); });
-    $b.find("[data-open='pp']").on("click", () => { d.hide(); frappe.set_route("List", "Production Plan", { sales_order: frm.doc.name }); });
-    $b.find("[data-open='jc']").on("click", () => { d.hide(); frappe.set_route("List", "Job Card", { sales_order: frm.doc.name }); });
-    d.show();
+
+    const root = d.fields_dict.body.$wrapper;
+    root.find("[data-open-doc]").on("click", function() {
+      const doctype = $(this).attr("data-open-doc");
+      const name = $(this).attr("data-docname");
+      if (doctype && name) {
+        window.open(`/app/${slug(doctype)}/${encodeURIComponent(name)}`, "_blank");
+      }
+    });
+    root.find("[data-pp-submit]").on("click", async function() {
+      const name = $(this).attr("data-pp-submit");
+      try {
+        await submitExistingDoc("Production Plan", name);
+        frappe.show_alert({ message: __("Production Plan {0} submitted", [name]), indicator: "green" }, 5);
+        d.hide();
+        frm.trigger("render_execution_dashboard");
+      } catch (error) {
+        frappe.msgprint(__("Failed: {0}", [error.message || error]));
+      }
+    });
+    root.find("[data-wo-submit]").on("click", async function() {
+      const name = $(this).attr("data-wo-submit");
+      try {
+        await submitExistingDoc("Work Order", name);
+        frappe.show_alert({ message: __("Work Order {0} submitted", [name]), indicator: "green" }, 5);
+        d.hide();
+        frm.trigger("render_execution_dashboard");
+      } catch (error) {
+        frappe.msgprint(__("Failed: {0}", [error.message || error]));
+      }
+    });
+    root.find("[data-wo-next]").on("click", function() {
+      const name = $(this).attr("data-work-order");
+      const nextAction = $(this).attr("data-wo-next");
+      const nextSeed = { ...seed, work_order: name };
+      d.hide();
+      if (nextAction === "mt") openStockEntryCreator(nextSeed, "Material Transfer for Manufacture");
+      if (nextAction === "mfg") openStockEntryCreator(nextSeed, "Manufacture");
+    });
+    root.find("[data-jc-dialog]").on("click", function() {
+      const mode = $(this).attr("data-jc-dialog");
+      const name = $(this).attr("data-job-card");
+      d.hide();
+      openJobCardControlDialog(mode, name);
+    });
+  };
+
+  const openCurrentDocuments = (seed) => {
+    let opened = 0;
+    if (seed.sales_order) {
+      window.open(`/app/sales-order/${encodeURIComponent(seed.sales_order)}`, "_blank");
+      opened += 1;
+    }
+    if (seed.production_plan) {
+      window.open(`/app/production-plan/${encodeURIComponent(seed.production_plan)}`, "_blank");
+      opened += 1;
+    }
+    if (seed.work_order) {
+      window.open(`/app/work-order/${encodeURIComponent(seed.work_order)}`, "_blank");
+      opened += 1;
+    }
+    if (seed.job_card) {
+      window.open(`/app/job-card/${encodeURIComponent(seed.job_card)}`, "_blank");
+      opened += 1;
+    }
+    if (!opened) {
+      frappe.show_alert({ message: __("No current documents available to open."), indicator: "orange" }, 4);
+    }
+  };
+
+  const openSalesOrderStatusBoard = (seed) => {
+    frappe.route_options = {
+      sales_order: seed.sales_order || frm.doc.name || "",
+      company: seed.company || frm.doc.company || "",
+      customer: seed.customer || frm.doc.customer || "",
+    };
+    frappe.set_route("sales-order-live");
   };
 
   const openActionCenterForItem = (item, defaultAction) => {
@@ -3464,21 +3867,27 @@ function bindDashboardActionButtons($wrap, frm){
     }
   };
 
+  const runDirectAction = (action, selectedItem) => {
+    const seed = buildSeedForItem(selectedItem);
+    if (action === "show_all_links") return openAllRelatedLinksDialog(frm);
+    if (action === "links") return openPlanningItemLinksDialog(frm, data, selectedItem);
+    if (action === "create_sales_order" || action === "so") return openSalesOrderCreator(seed);
+    if (action === "create_production_plan" || action === "pp") return openProductionPlanCreator(seed);
+    if (action === "create_work_order" || action === "wo") return openWorkOrderCreator(seed);
+    if (action === "manage_docs" || action === "manage" || action === "view") return openExistingDocsDialog(seed);
+    if (action === "create_material_transfer" || action === "mt") return openStockEntryCreator(seed, "Material Transfer for Manufacture");
+    if (action === "create_manufacture_entry" || action === "mfg") return openStockEntryCreator(seed, "Manufacture");
+    if (action === "create_delivery_note" || action === "dn") return openDeliveryNoteCreator(seed);
+    if (action === "return_disassemble" || action === "ret") return openStockEntryCreator(seed, "Disassemble");
+    if (action === "open_current_docs") return openCurrentDocuments(seed);
+    if (action === "so_status_board") return openSalesOrderStatusBoard(seed);
+  };
+
   $wrap.find("[data-so-action]").off("click").on("click", function(e){
     e.preventDefault();
     e.stopPropagation();
     const action = $(this).attr("data-so-action");
-    const map = {
-      create_sales_order: "so",
-      create_production_plan: "pp",
-      create_work_order: "wo",
-      create_material_transfer: "mt",
-      create_manufacture_entry: "mfg",
-      create_delivery_note: "dn",
-      return_disassemble: "ret",
-      manage_docs: "manage",
-    };
-    openActionCenterForItem(primaryItem, map[action] || "");
+    runDirectAction(action, primaryItem);
   });
 
   $wrap.find("[data-plan-action]").off("click").on("click", function(e){
@@ -3486,8 +3895,23 @@ function bindDashboardActionButtons($wrap, frm){
     e.stopPropagation();
     const action = $(this).attr("data-plan-action");
     const item = ($(this).attr("data-item") || "").trim();
-    const map = { pp: "pp", wo: "wo", mt: "mt", mfg: "mfg", dn: "dn", view: "" };
-    openActionCenterForItem(item, map[action] || "");
+    runDirectAction(action, item);
+  });
+
+  $wrap.find("[data-jc-action]").off("click").on("click", function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const action = $(this).attr("data-jc-action");
+    const jobCard = ($(this).attr("data-job-card") || "").trim();
+    const item = ($(this).attr("data-item") || "").trim();
+    if (!jobCard) return;
+    if (action === "manage") {
+      openExistingDocsDialog({ ...buildSeedForItem(item), job_card: jobCard });
+      return;
+    }
+    if (action === "start" || action === "pause" || action === "complete") {
+      openJobCardControlDialog(action === "pause" ? "pause" : action, jobCard);
+    }
   });
 }
 
