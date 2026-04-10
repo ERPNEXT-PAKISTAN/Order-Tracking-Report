@@ -11,12 +11,20 @@ fixtures = [
 		"filters": [["dt", "=", "Sales Order"]],
 	},
 	{
+		"dt": "Custom HTML Block",
+		"filters": [["name", "in", ["Live Work Order", "Work Order"]]],
+	},
+	{
 		"dt": "Property Setter",
 		"filters": [["doc_type", "=", "Sales Order"]],
 	},
 	{
 		"dt": "Print Format",
 		"filters": [["name", "in", ["Sales Order Contract", "Sales Order Contract with Comment"]]],
+	},
+	{
+		"dt": "Server Script",
+		"filters": [["name", "in", ["Work Order"]]],
 	},
 ]
 

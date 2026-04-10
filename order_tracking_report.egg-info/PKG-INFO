@@ -8,57 +8,162 @@ Requires-Python: >=3.14
 Description-Content-Type: text/markdown
 Dynamic: author
 
-### Order Tracking Report
+### Order-Tracking-Report
 
 This app packages Sales Order customizations so they can be moved to another server.
 
-Included fixtures:
+Backend design:
 
 - Custom Fields (`Sales Order`) including `custom_detail_status` and `custom_po_item`
-- Client Scripts (`Sales Order`)
+- Client logic moved to app files:
+  - `order_tracking_report/public/js/sales_order.js` (detail status + SO actions)
+  - `order_tracking_report/public/js/data_entry/*.js` (Data Entry on Sales Order, Sales Invoice, Purchase Order, Purchase Receipt, Purchase Invoice, Stock Entry)
 - Property Setters (`Sales Order`)
-- Server Scripts:
-  - `Sales Order Detail Status`
-  - `create_po_from_sales_order_po_tab`
-- Custom Reports (`Sales Order`, non-standard only)
+- API logic moved to app file: `order_tracking_report/api.py`
+- Detail status backend engine: `order_tracking_report/so_detail_status_backend.py`
+- Legacy `Client Script` and `Server Script` records are auto-removed by:
+  - `order_tracking_report.cleanup.remove_legacy_ui_scripts` (hook: `after_migrate`)
+- Purchase Order -> Item PO status sync is now app `doc_events`:
+  - `order_tracking_report.po_sync.sync_item_po_status_for_purchase_order`
+  - old `Status update Creat PO from SO_po_tab*` server scripts are removed on migrate
+- Child table dependency is auto-ensured by:
+  - `order_tracking_report.bootstrap.ensure_item_po_setup` (creates `Item PO` Doctype/fields if missing)
+
+Included fixtures:
+
+- `Custom Field`
+- `Property Setter`
+- `Print Format`
 
 ### Installation
 
-1. Copy/push this app to the target server bench `apps` path.
-2. Install the app:
+Install on new server/site:
 
 ```bash
-cd $PATH_TO_YOUR_BENCH
-bench get-app $URL_OF_THIS_REPO
-bench install-app order_tracking_report
-bench --site $SITE_NAME migrate
-bench clear-cache
+cd /home/frappe/frappe-bench
+bench get-app --branch main order_tracking_report https://github.com/ERPNEXT-PAKISTAN/Order-Tracking-Report.git
+bench --site site1.local install-app order_tracking_report
+bench --site site1.local migrate
+bench --site site1.local clear-cache
+bench restart
 ```
 
-### Update Fixtures (source server)
+If your server already has old UI scripts/fields, install is still safe:
+- Existing fields with same name are updated by fixtures.
+- Legacy app script records are removed on migrate (exact known names only).
 
-When you add more Sales Order customizations, re-export fixtures:
+### Update on Server (already installed)
+
+If `git pull origin main` fails with:
+`fatal: 'origin' does not appear to be a git repository`
+then app folder is not linked to remote yet. Run one-time setup:
 
 ```bash
-cd $PATH_TO_YOUR_BENCH
-bench --site $SITE_NAME export-fixtures --app order_tracking_report
+cd /home/frappe/frappe-bench/apps/order_tracking_report
+git init
+git remote add origin https://github.com/ERPNEXT-PAKISTAN/Order-Tracking-Report.git
+git fetch origin
+git checkout -B main origin/main
 ```
 
-### Contributing
-
-This app uses `pre-commit` for code formatting and linting. Please [install pre-commit](https://pre-commit.com/#installation) and enable it for this repository:
+Regular update command:
 
 ```bash
-cd apps/order_tracking_report
-pre-commit install
+cd /home/frappe/frappe-bench/apps/order_tracking_report
+git pull origin main
+cd /home/frappe/frappe-bench
+bench --site site1.local migrate
+bench --site site1.local clear-cache
+bench restart
 ```
 
-Pre-commit is configured to use the following tools for checking and formatting your code:
+Important:
+- Use `/home/frappe/frappe-bench` for all commands on this setup.
 
-- ruff
-- eslint
-- prettier
-- pyupgrade
+### Multi-Site Example (`ah.frappe.my`)
+
+```bash
+cd /home/frappe/frappe-bench/apps/order_tracking_report
+git pull origin main
+cd /home/frappe/frappe-bench
+bench --site ah.frappe.my migrate
+bench --site ah.frappe.my clear-cache
+bench restart
+```
+
+If this app folder is not linked to GitHub yet:
+
+```bash
+cd /home/frappe/frappe-bench/apps/order_tracking_report
+git init
+git remote add origin https://github.com/ERPNEXT-PAKISTAN/Order-Tracking-Report.git
+git fetch origin
+git checkout -B main origin/main
+```
+
+### Folder Schema (3 Sections)
+
+1. Core Backend
+
+```text
+apps/order_tracking_report/
+  order_tracking_report/
+    hooks.py
+    api.py
+    bootstrap.py
+    so_detail_status_backend.py
+    cleanup.py
+```
+
+2. Frontend JS (inside app)
+
+```text
+apps/order_tracking_report/
+  order_tracking_report/public/js/
+    sales_order.js
+    data_entry/
+      sales_order_data_entry.js
+      sales_invoice_data_entry.js
+      purchase_order_data_entry.js
+      purchase_receipt_data_entry.js
+      purchase_invoice_data_entry.js
+      stock_entry_data_entry.js
+```
+
+3. Fixtures and Reports
+
+```text
+apps/order_tracking_report/
+  order_tracking_report/fixtures/
+    custom_field.json
+    property_setter.json
+    print_format.json
+  order_tracking_report/order_tracking_report/report/
+    purchase_order_updated_status/
+      purchase_order_updated_status.py
+      purchase_order_updated_status.js
+      purchase_order_updated_status.json
+```
+
+### Add Images in Markdown
+
+Store screenshots in:
+
+```text
+docs/images/
+```
+
+Example markdown syntax:
+
+```md
+![Dashboard](docs/images/dashboard.png)
+```
+
+With custom size (HTML):
+
+```html
+<img src="docs/images/dashboard.png" alt="Dashboard" width="900">
+```
 
 ### License
 
