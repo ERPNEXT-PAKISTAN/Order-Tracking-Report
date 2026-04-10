@@ -24,7 +24,7 @@ fixtures = [
 	},
 	{
 		"dt": "Server Script",
-		"filters": [["name", "in", ["Work Order"]]],
+		"filters": [["name", "in", ["Work Order", "live_production_api"]]],
 	},
 ]
 
@@ -79,6 +79,7 @@ doctype_js = {
 
 after_migrate = [
 	"order_tracking_report.bootstrap.ensure_item_po_setup",
+	"order_tracking_report.bootstrap.ensure_sales_order_live_shortcuts",
 	"order_tracking_report.cleanup.remove_legacy_ui_scripts",
 	"order_tracking_report.cleanup.normalize_purchase_receipt_titles",
 ]

@@ -12,6 +12,162 @@ def ensure_item_po_setup():
     ensure_allow_on_submit_for_po_fields()
 
 
+def ensure_sales_order_live_shortcuts():
+    ensure_manufacturing_workspace_shortcut()
+    ensure_manufacturing_live_work_order_shortcut()
+
+
+def ensure_manufacturing_workspace_shortcut():
+    if not frappe.db.exists("Workspace", "Manufacturing"):
+        return
+
+    changed = False
+
+    has_shortcut = frappe.db.exists(
+        "Workspace Shortcut",
+        {
+            "parent": "Manufacturing",
+            "parenttype": "Workspace",
+            "parentfield": "shortcuts",
+            "label": "Sales Order Live",
+            "type": "Page",
+            "link_to": "sales-order-live",
+        },
+    )
+    if not has_shortcut:
+        next_idx = frappe.db.count(
+            "Workspace Shortcut",
+            {
+                "parent": "Manufacturing",
+                "parenttype": "Workspace",
+                "parentfield": "shortcuts",
+            },
+        ) + 1
+        frappe.get_doc(
+            {
+                "doctype": "Workspace Shortcut",
+                "parent": "Manufacturing",
+                "parenttype": "Workspace",
+                "parentfield": "shortcuts",
+                "idx": next_idx,
+                "label": "Sales Order Live",
+                "type": "Page",
+                "link_to": "sales-order-live",
+                "color": "blue",
+            }
+        ).db_insert(ignore_if_duplicate=True)
+        changed = True
+
+    try:
+        content = frappe.parse_json(frappe.db.get_value("Workspace", "Manufacturing", "content")) or []
+    except Exception:
+        content = []
+
+    has_shortcut_block = any(
+        block.get("type") == "shortcut"
+        and (block.get("data") or {}).get("shortcut_name") == "Sales Order Live"
+        for block in content
+    )
+
+    if not has_shortcut_block:
+        shortcut_block = {
+            "id": frappe.generate_hash(length=10),
+            "type": "shortcut",
+            "data": {"shortcut_name": "Sales Order Live", "col": 3},
+        }
+
+        insert_at = next(
+            (
+                index
+                for index, block in enumerate(content)
+                if block.get("type") in {"spacer", "card", "header"}
+                and (block.get("data") or {}).get("text") != '<span class="h4"><b>Your Shortcuts</b></span>'
+            ),
+            len(content),
+        )
+        content.insert(insert_at, shortcut_block)
+        frappe.db.set_value("Workspace", "Manufacturing", "content", frappe.as_json(content), update_modified=False)
+        changed = True
+
+    if changed:
+        frappe.clear_document_cache("Workspace", "Manufacturing")
+
+
+def ensure_manufacturing_live_work_order_shortcut():
+    if not frappe.db.exists("Workspace", "Manufacturing"):
+        return
+
+    changed = False
+
+    has_shortcut = frappe.db.exists(
+        "Workspace Shortcut",
+        {
+            "parent": "Manufacturing",
+            "parenttype": "Workspace",
+            "parentfield": "shortcuts",
+            "label": "Live Work Order",
+            "type": "Page",
+            "link_to": "live-work-order",
+        },
+    )
+    if not has_shortcut:
+        next_idx = frappe.db.count(
+            "Workspace Shortcut",
+            {
+                "parent": "Manufacturing",
+                "parenttype": "Workspace",
+                "parentfield": "shortcuts",
+            },
+        ) + 1
+        frappe.get_doc(
+            {
+                "doctype": "Workspace Shortcut",
+                "parent": "Manufacturing",
+                "parenttype": "Workspace",
+                "parentfield": "shortcuts",
+                "idx": next_idx,
+                "label": "Live Work Order",
+                "type": "Page",
+                "link_to": "live-work-order",
+                "color": "green",
+            }
+        ).db_insert(ignore_if_duplicate=True)
+        changed = True
+
+    try:
+        content = frappe.parse_json(frappe.db.get_value("Workspace", "Manufacturing", "content")) or []
+    except Exception:
+        content = []
+
+    has_shortcut_block = any(
+        block.get("type") == "shortcut"
+        and (block.get("data") or {}).get("shortcut_name") == "Live Work Order"
+        for block in content
+    )
+
+    if not has_shortcut_block:
+        shortcut_block = {
+            "id": frappe.generate_hash(length=10),
+            "type": "shortcut",
+            "data": {"shortcut_name": "Live Work Order", "col": 3},
+        }
+        insert_at = next(
+            (
+                index
+                for index, block in enumerate(content)
+                if block.get("type") in {"spacer", "card", "header"}
+                and (block.get("data") or {}).get("text") != '<span class="h4"><b>Your Shortcuts</b></span>'
+            ),
+            len(content),
+        )
+        content.insert(insert_at, shortcut_block)
+        frappe.db.set_value("Workspace", "Manufacturing", "content", frappe.as_json(content), update_modified=False)
+        changed = True
+
+    if changed:
+        frappe.clear_document_cache("Workspace", "Manufacturing")
+
+
 def ensure_wastage_doctype():
     if frappe.db.exists("DocType", "Wastage"):
         return

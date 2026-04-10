@@ -1,6 +1,47 @@
+import json
+import re
+
 import frappe
 
 from .so_detail_status_backend import run as run_detail_status
+
+
+def _get_custom_html_block_from_fixtures(block_name):
+    fixture_path = frappe.get_app_path(
+        "order_tracking_report",
+        "fixtures",
+        "custom_html_block.json",
+    )
+    with open(fixture_path, encoding="utf-8") as fixture_file:
+        data = json.load(fixture_file)
+
+    for row in data:
+        if row.get("name") == block_name:
+            return row
+
+    return None
+
+
+@frappe.whitelist()
+def get_custom_html_block_page_payload(block_name=None):
+    block_name = (block_name or "").strip()
+    if not block_name:
+        frappe.throw("Custom HTML Block name is required")
+
+    block = _get_custom_html_block_from_fixtures(block_name)
+    if not block:
+        frappe.throw(f"Custom HTML Block not found in app fixtures: {block_name}")
+
+    html = block.get("html") or ""
+    html = re.sub(r"(?is)^.*?<body[^>]*>", "", html)
+    html = re.sub(r"(?is)</body>.*$", "", html)
+    html = re.sub(r"(?is)<script\b[^>]*>.*?</script>", "", html)
+
+    return {
+        "name": block.get("name"),
+        "html": html.strip(),
+        "script": block.get("script") or "",
+    }
 
 
 @frappe.whitelist()

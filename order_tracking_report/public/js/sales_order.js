@@ -74,6 +74,27 @@ frappe.ui.form.on("Sales Order", {
       frm.trigger("render_execution_dashboard");
     }, __("View"));
 
+    frm.add_custom_button(__("Sales Order Live"), () => {
+      frappe.route_options = {
+        sales_order: frm.doc.name,
+        company: frm.doc.company || "",
+        customer: frm.doc.customer || "",
+      };
+      frappe.set_route("sales-order-live");
+    }, __("View"));
+
+    frm.add_custom_button(__("Live Work Order"), () => {
+      frappe.route_options = {
+        sales_order: frm.doc.name,
+        company: frm.doc.company || "",
+      };
+      frappe.set_route("live-work-order");
+    }, __("View"));
+
+    frm.add_custom_button(__("All Related Links"), () => {
+      openAllRelatedLinksDialog(frm);
+    }, __("View"));
+
     frm.trigger("render_execution_dashboard");
   },
 
@@ -931,6 +952,115 @@ function buildDashboard(frm, data){
     ${card("Procurement", "Purchase Order / Purchase Receipt / Purchase Invoice", data.procurement && data.procurement.length ? `<div class="table-responsive"><table class="table table-bordered so-table"><thead><tr><th>Document</th><th>Status</th><th style="text-align:right;">Qty</th><th>Details</th></tr></thead><tbody>${data.procurement.map(r=>`<tr><td><div style="font-weight:900">${esc(r.doctype||"")}</div><div>${docLink(r.doctype, r.name)}</div></td><td>${badge(r.status)}</td><td style="text-align:right;">${esc(r.qty||"")}</td><td class="muted">${esc(r.details||"")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="text-muted">No records.</div>`)}
     ${card("Delivery & Billing", "Delivery Note → Invoices, click document number to open popup item details", deliveryHierarchy(data.sales_fulfillment_hierarchy||[]))}
   `;
+}
+
+function openAllRelatedLinksDialog(frm) {
+  frappe.call({
+    method: "order_tracking_report.api.custom_so_execution_status",
+    args: { sales_order: frm.doc.name },
+    freeze: true,
+    freeze_message: __("Loading related links..."),
+    callback: (r) => {
+      const data = (r && r.message) ? r.message : {};
+      const html = buildAllRelatedLinksHtml(frm, data);
+      const dialog = new frappe.ui.Dialog({
+        title: __("All Related Links"),
+        size: "extra-large",
+        fields: [{ fieldtype: "HTML", fieldname: "content" }],
+      });
+      dialog.fields_dict.content.$wrapper.html(html);
+      dialog.show();
+    },
+  });
+}
+
+function buildAllRelatedLinksHtml(frm, data) {
+  const groups = {
+    "Sales Order": [frm.doc.name],
+    "Production Plan": [],
+    "Work Order": [],
+    "Job Card": [],
+    "Purchase Order": [],
+    "Purchase Receipt": [],
+    "Purchase Invoice": [],
+    "Delivery Note": [],
+    "Sales Invoice": [],
+  };
+
+  (data.production_tree || []).forEach((node) => {
+    const pp = node && node.production_plan ? node.production_plan.name : "";
+    if (pp) groups["Production Plan"].push(pp);
+    (node.work_orders || []).forEach((wo) => {
+      if (wo && wo.name) groups["Work Order"].push(wo.name);
+      (wo.job_cards || []).forEach((jc) => {
+        if (jc && jc.name) groups["Job Card"].push(jc.name);
+      });
+    });
+  });
+
+  (data.procurement || []).forEach((row) => {
+    if (row && row.doctype && row.name && groups[row.doctype]) {
+      groups[row.doctype].push(row.name);
+    }
+  });
+
+  (data.purchase_flow_rows || []).forEach((row) => {
+    if (row.purchase_order) groups["Purchase Order"].push(row.purchase_order);
+    splitDocNames(row.purchase_receipts).forEach((name) => groups["Purchase Receipt"].push(name));
+    splitDocNames(row.purchase_invoices).forEach((name) => groups["Purchase Invoice"].push(name));
+  });
+
+  (data.sales_fulfillment_hierarchy || []).forEach((row) => {
+    if (row.delivery_note) groups["Delivery Note"].push(row.delivery_note);
+    (row.invoices || []).forEach((invoice) => {
+      if (invoice && invoice.name) groups["Sales Invoice"].push(invoice.name);
+    });
+  });
+
+  const sections = Object.keys(groups).map((doctype) => {
+    const values = [...new Set((groups[doctype] || []).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+    return `
+      <div style="border:1px solid #dbe4f0;border-radius:14px;padding:14px;background:#f8fafc;">
+        <div style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.04em;">${esc(doctype)}</div>
+        <div style="margin-top:8px;font-size:22px;font-weight:900;color:#0f172a;">${values.length}</div>
+        <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">${values.length ? values.map((name) => relatedDocChip(doctype, name)).join("") : `<span style="font-size:12px;color:#64748b;">${__("No linked documents")}</span>`}</div>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div style="display:grid;gap:14px;">
+      <div style="padding:12px 14px;border:1px solid #bfdbfe;border-radius:14px;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:700;">
+        ${__("Open any related document in a new tab.")}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;">
+        ${sections}
+      </div>
+    </div>
+  `;
+}
+
+function splitDocNames(value) {
+  return String(value || "").split(",").map((name) => (name || "").trim()).filter(Boolean);
+}
+
+function relatedDocChip(doctype, name) {
+  const slugMap = {
+    "Sales Order": "sales-order",
+    "Production Plan": "production-plan",
+    "Work Order": "work-order",
+    "Job Card": "job-card",
+    "Purchase Order": "purchase-order",
+    "Purchase Receipt": "purchase-receipt",
+    "Purchase Invoice": "purchase-invoice",
+    "Delivery Note": "delivery-note",
+    "Sales Invoice": "sales-invoice",
+  };
+  const slug = slugMap[doctype];
+  if (!slug || !name) {
+    return `<span style="display:inline-flex;align-items:center;padding:5px 9px;border-radius:999px;background:#e2e8f0;color:#334155;font-size:11px;font-weight:800;">${esc(name || "")}</span>`;
+  }
+  return `<a href="/app/${slug}/${encodeURIComponent(name)}" target="_blank" style="display:inline-flex;align-items:center;padding:5px 9px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:800;text-decoration:none;">${esc(name)}</a>`;
 }
 
 
@@ -2813,11 +2943,11 @@ function manufacturingControlCenter(frm, data){
       <div class="so-card-h"><div class="t">Manufacturing Control Center</div><div class="s">Same logic style with Live Work Order integration</div></div>
       <div class="so-card-b">
         <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;">
-          <div class="so-mini-card"><div class="so-mini-title">Company</div><div class="so-mini-val">${esc(frm.doc.company || "-")}</div></div>
-          <div class="so-mini-card"><div class="so-mini-title">Sales Order</div><div class="so-mini-val">${esc(frm.doc.name || "-")}</div></div>
-          <div class="so-mini-card"><div class="so-mini-title">Production Plan</div><div class="so-mini-val">${esc(p.pp || "—")}</div></div>
-          <div class="so-mini-card"><div class="so-mini-title">Work Order</div><div class="so-mini-val">${esc(p.wo || "—")}</div></div>
-          <div class="so-mini-card"><div class="so-mini-title">Items</div><div class="so-mini-val">${esc(p.item || "Multiple")}</div></div>
+          <div class="so-mini-card"><div class="so-mini-title" style="font-size:10px;">Company</div><div class="so-mini-val" style="font-size:12px;line-height:1.25;">${esc(frm.doc.company || "-")}</div></div>
+          <div class="so-mini-card"><div class="so-mini-title" style="font-size:10px;">Sales Order</div><div class="so-mini-val" style="font-size:12px;line-height:1.25;">${esc(frm.doc.name || "-")}</div></div>
+          <div class="so-mini-card"><div class="so-mini-title" style="font-size:10px;">Production Plan</div><div class="so-mini-val" style="font-size:12px;line-height:1.25;">${esc(p.pp || "—")}</div></div>
+          <div class="so-mini-card"><div class="so-mini-title" style="font-size:10px;">Work Order</div><div class="so-mini-val" style="font-size:12px;line-height:1.25;">${esc(p.wo || "—")}</div></div>
+          <div class="so-mini-card"><div class="so-mini-title" style="font-size:10px;">Items</div><div class="so-mini-val" style="font-size:12px;line-height:1.25;">${esc(p.item || "Multiple")}</div></div>
         </div>
         <div style="margin-top:10px;padding:10px;border:1px solid #bfdbfe;border-radius:10px;background:#eff6ff;color:#1d4ed8;font-weight:700;">
           Recommended flow: Sales Order -> Production Plan -> Submit Plan -> Create/Submit Work Order -> Material Transfer -> Start/Pause/Complete Job Cards -> Manufacture/Return Material.
@@ -3477,6 +3607,9 @@ function buildDashboard(frm, data){
       ${kpis(totals)}
     </div>
 
+    ${manufacturingControlCenter(frm, data)}
+    ${card("Sales Order Items Planning", "Planning overview by Sales Order item", salesOrderItemsPlanningTable(data))}
+
     ${sectionBlock('profit', 'Profit and Loss Section', 'linear-gradient(90deg,#0f766e,#14b8a6)', `
       ${card("Profit Dashboard", "Estimated cost from default BOM and sales amount", `${profitSummaryCard(data.profit_summary || {})}<div style="margin-top:12px;font-weight:900;">Profit by Item</div>${profitByItemTable(data.profit_by_item || [])}`)}
       ${card("Purchase Order Total Amount", "Total amount of Purchase Orders linked with this Sales Order", `<div class="so-mini-card"><div class="so-mini-title">TOTAL PO AMOUNT</div><div class="so-mini-val" style="font-size:26px;">${_money0(poTotal)}</div></div>`)}
@@ -3492,8 +3625,6 @@ function buildDashboard(frm, data){
     `, false)}
 
     ${sectionBlock('production', 'Production Section', 'linear-gradient(90deg,#7a3e00,#a16207)', `
-      ${manufacturingControlCenter(frm, data)}
-      ${card("Sales Order Items Planning", "Planning overview by Sales Order item", salesOrderItemsPlanningTable(data))}
       ${card("Production Details", "Job Card / Operation / Material details", productionTree(data.production_tree||[]))}
       ${card("Production Timeline", "Work Orders, Delivery Notes and Invoices timeline", timelineView(data.gantt_timeline || []))}
       ${card("Machine Utilization", "Workstation time from Job Card Time Logs", machineUtilization(data.machine_utilization || []))}
