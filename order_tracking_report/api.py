@@ -13,6 +13,40 @@ def custom_so_execution_status(sales_order=None, action=None, doctype=None, docn
     )
 
 
+@frappe.whitelist()
+def get_last_purchase_rate(item_code=None, supplier=None, company=None):
+    item_code = (item_code or "").strip()
+    supplier = (supplier or "").strip()
+    company = (company or "").strip()
+    if not item_code:
+        return {"rate": 0}
+
+    conditions = ["po.docstatus = 1", "poi.item_code = %(item_code)s"]
+    values = {"item_code": item_code}
+    if supplier:
+        conditions.append("po.supplier = %(supplier)s")
+        values["supplier"] = supplier
+    if company:
+        conditions.append("po.company = %(company)s")
+        values["company"] = company
+
+    row = frappe.db.sql(
+        """
+        SELECT poi.rate
+        FROM `tabPurchase Order Item` poi
+        JOIN `tabPurchase Order` po ON po.name = poi.parent
+        WHERE {where_clause}
+        ORDER BY po.transaction_date DESC, poi.modified DESC
+        LIMIT 1
+        """.format(where_clause=" AND ".join(conditions)),
+        values=values,
+        as_dict=True,
+    )
+    if row:
+        return {"rate": frappe.utils.flt(row[0].get("rate") or 0)}
+    return {"rate": 0}
+
+
 def _parse_row_names(raw):
     values = []
     if not raw:

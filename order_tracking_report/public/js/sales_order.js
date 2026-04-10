@@ -481,6 +481,12 @@ function productionTree(tree){
             <div class="muted">Item: ${esc(wo.production_item||"")}</div>
             <div class="muted">Plan: ${esc(fmtDT(wo.planned_start_date))} → ${esc(fmtDT(wo.planned_end_date))}</div>
             ${wo.is_delayed ? `<div class="so-danger">Delayed Work Order</div>` : ``}
+            <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="btn btn-xs btn-warning" data-plan-action="mt" data-item="${esc(wo.production_item || "")}">Material Transfer</button>
+              <button class="btn btn-xs btn-primary" data-plan-action="mfg" data-item="${esc(wo.production_item || "")}">Manufacture</button>
+              <button class="btn btn-xs btn-success" data-plan-action="dn" data-item="${esc(wo.production_item || "")}">Delivery Note</button>
+              <button class="btn btn-xs btn-default" data-plan-action="view" data-item="${esc(wo.production_item || "")}">View</button>
+            </div>
           </div>
           <div style="text-align:right;min-width:230px;">
             <div>${badge(wo.status)}</div>
@@ -2257,6 +2263,38 @@ function open_po_item_data_entry(frm, prefill) {
     if (!dialog.get_value("descriptions") && item_meta.description) dialog.set_value("descriptions", stripHtml(item_meta.description));
     if (!dialog.get_value("warehouse") && item_meta.default_warehouse) dialog.set_value("warehouse", item_meta.default_warehouse);
     if (!toNum(dialog.get_value("rate")) && toNum(item_meta.last_purchase_rate)) dialog.set_value("rate", toNum(item_meta.last_purchase_rate));
+    if (!toNum(dialog.get_value("rate"))) {
+      frappe.call({
+        method: "order_tracking_report.api.get_last_purchase_rate",
+        args: {
+          item_code: code,
+          supplier: dialog.get_value("supplier") || "",
+          company: frm.doc.company || "",
+        },
+        callback: (r) => {
+          const rate = toNum((r && r.message && r.message.rate) || 0);
+          if (rate > 0 && !toNum(dialog.get_value("rate"))) dialog.set_value("rate", rate);
+        },
+      });
+    }
+  };
+
+  dialog.fields_dict.supplier.df.onchange = function () {
+    const code = dialog.get_value("item_code");
+    if (!code) return;
+    if (toNum(dialog.get_value("rate")) > 0) return;
+    frappe.call({
+      method: "order_tracking_report.api.get_last_purchase_rate",
+      args: {
+        item_code: code,
+        supplier: dialog.get_value("supplier") || "",
+        company: frm.doc.company || "",
+      },
+      callback: (r) => {
+        const rate = toNum((r && r.message && r.message.rate) || 0);
+        if (rate > 0) dialog.set_value("rate", rate);
+      },
+    });
   };
 
   function bind_add_row_button() {
@@ -2823,6 +2861,8 @@ function materialShortageTable(rows){
     const wpo = list.reduce((a, r) => a + ((Number(r.po_qty || 0) * Number(r.wastage_pct || 0)) / 100), 0);
     const prq = list.reduce((a, r) => a + Number(r.pr_qty || 0), 0);
     const ppq = list.reduce((a, r) => a + Number(r.pending_po_qty || 0), 0);
+    const lprArr = list.map((r) => Number(r.last_purchase_rate || 0)).filter((x) => x > 0);
+    const lprGroup = lprArr.length ? (lprArr.reduce((a, b) => a + b, 0) / lprArr.length) : 0;
 
     body += `
       <tr class="so-group-row" data-toggle="so" data-target="${esc(key)}" style="cursor:pointer;background:#f8fafc;">
@@ -2837,7 +2877,10 @@ function materialShortageTable(rows){
         <td style="text-align:right;">${_n0(wpo)}</td>
         <td style="text-align:right;">${_n0(prq)}</td>
         <td style="text-align:right;" class="${ppq>0?'so-warning':'so-success'}">${_n0(ppq)}</td>
-        <td></td>
+        <td style="text-align:right;">${_money0(lprGroup)}</td>
+        <td>
+          ${suggested > 0 ? `<button class="btn btn-xs btn-primary" data-ms-create-po-group="1" data-group="${esc(g)}">${__("Create PO")}</button>` : `<span class="text-muted">-</span>`}
+        </td>
       </tr>
     `;
 
@@ -2857,6 +2900,7 @@ function materialShortageTable(rows){
           <td style="text-align:right;">${_n0((Number(r.po_qty || 0) * Number(r.wastage_pct || 0)) / 100)}</td>
           <td style="text-align:right;">${_n0(r.pr_qty)}</td>
           <td style="text-align:right;" class="${Number(r.pending_po_qty||0)>0?'so-warning':'so-success'}">${_n0(r.pending_po_qty)}</td>
+          <td style="text-align:right;">${_money0(r.last_purchase_rate || 0)}</td>
           <td>
             ${suggestedQty > 0 ? `<button class="btn btn-xs btn-primary" data-ms-create-po="1" data-item="${esc(r.item_code || "")}" data-qty="${esc(shortageQty)}" data-description="${esc(r.item_code || "")}" data-wp="${esc(r.wastage_pct || 0)}" data-wq="${esc(r.wastage_qty || 0)}">${__("Create PO")}</button>` : `<span class="text-muted">-</span>`}
           </td>
@@ -2880,6 +2924,7 @@ function materialShortageTable(rows){
           <th style="width:130px;text-align:right;">Wastage on PO</th>
           <th style="width:100px;text-align:right;">PR Qty</th>
           <th style="width:130px;text-align:right;">Pending PO Qty</th>
+          <th style="width:130px;text-align:right;">Last Purchase Price</th>
           <th style="width:120px;">Create PO</th>
         </tr>
       </thead>
@@ -3066,7 +3111,9 @@ function bindDashboardActionButtons($wrap, frm){
     frappe.new_doc(doctype);
   };
 
-  $wrap.find("[data-so-action]").off("click").on("click", function(){
+  $wrap.find("[data-so-action]").off("click").on("click", function(e){
+    e.preventDefault();
+    e.stopPropagation();
     const action = $(this).attr("data-so-action");
     const common = { sales_order: frm.doc.name, company: frm.doc.company };
     if (action === "create_sales_order") openNew("Sales Order", { company: frm.doc.company });
@@ -3079,7 +3126,9 @@ function bindDashboardActionButtons($wrap, frm){
     else if (action === "manage_docs") frappe.set_route("query-report", "Purchase Order updated Status");
   });
 
-  $wrap.find("[data-plan-action]").off("click").on("click", function(){
+  $wrap.find("[data-plan-action]").off("click").on("click", function(e){
+    e.preventDefault();
+    e.stopPropagation();
     const action = $(this).attr("data-plan-action");
     const item = ($(this).attr("data-item") || "").trim();
     if (action === "pp") {
@@ -3121,6 +3170,7 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
 
   $wrap.find("[data-ms-create-po='1']").off("click").on("click", function(e){
     e.preventDefault();
+    e.stopPropagation();
     const item = ($(this).attr("data-item") || "").trim();
     const defaultQty = flt($(this).attr("data-qty") || 0);
     const description = ($(this).attr("data-description") || "").trim();
@@ -3131,6 +3181,7 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
       return;
     }
     const d = itemDefaults[item] || {};
+    const ml = (data.material_shortage || []).find((r) => String(r.item_code || "").trim() === item) || {};
     open_po_item_data_entry(frm, {
       item_code: item,
       qty: defaultQty,
@@ -3138,7 +3189,7 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
       select_for_po: 1,
       supplier: d.supplier || "",
       warehouse: d.warehouse || "",
-      rate: Number(d.rate || 0),
+      rate: Number(d.rate || ml.last_purchase_rate || 0),
       custom_wastage_percentage: wp || Number(d.custom_wastage_percentage || 0),
       custom_wastage_qty: wq || Number(d.custom_wastage_qty || 0),
       extra_qty: Number(d.extra_qty || 0),
@@ -3147,9 +3198,14 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
 
   $wrap.find("[data-ms-create-po-group='1']").off("click").on("click", function(e){
     e.preventDefault();
+    e.stopPropagation();
     const group = ($(this).attr("data-group") || "").trim();
     if (!group) return;
-    const rows = (data.material_shortage || []).filter((r) => (r.item_group || "") === group && Number(r.shortage_qty || 0) > 0);
+    const rows = (data.material_shortage || []).filter((r) => {
+      if ((r.item_group || "") !== group) return false;
+      const suggested = Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0);
+      return suggested > 0;
+    });
     if (!rows.length) {
       frappe.msgprint(__("No shortage rows found for this Item Group."));
       return;
@@ -3157,14 +3213,15 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
     const prefillRows = rows.map((r) => ({
       ...(itemDefaults[r.item_code || ""] || {}),
       item_code: r.item_code || "",
-      qty: Number(r.shortage_qty || 0),
+      qty: Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0),
       base_qty: Number(r.required_qty || 0),
       custom_wastage_percentage: Number(r.wastage_pct || 0),
       custom_wastage_qty: Number(r.wastage_qty || 0),
       po_qty: Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0),
+      rate: Number(r.last_purchase_rate || 0),
       descriptions: r.item_code || "",
       select_for_po: 1,
-    })).filter((r) => r.item_code && r.qty > 0);
+    })).filter((r) => r.item_code && (Number(r.qty || 0) > 0 || Number(r.po_qty || 0) > 0));
 
     if (!prefillRows.length) {
       frappe.msgprint(__("No valid rows found for Create PO."));

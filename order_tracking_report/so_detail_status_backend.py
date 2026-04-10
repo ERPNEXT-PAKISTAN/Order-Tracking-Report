@@ -1527,6 +1527,26 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                 if item_key:
                     wastage_pct_item_map[item_key] = pct
 
+        # Last purchase rate by item (latest submitted PO item rate)
+        item_last_purchase_rate_map = {}
+        all_codes_for_rate = uniq_list([r.get("item_code") for r in rows if r.get("item_code")])
+        if all_codes_for_rate:
+            try:
+                rate_rows = safe_sql(
+                    "SELECT poi.item_code, poi.rate "
+                    "FROM `tabPurchase Order Item` poi "
+                    "JOIN `tabPurchase Order` po ON po.name = poi.parent "
+                    "WHERE po.docstatus = 1 AND poi.item_code IN %(items)s "
+                    "ORDER BY po.transaction_date DESC, poi.modified DESC",
+                    {"items": tuple(all_codes_for_rate)},
+                )
+            except Exception:
+                rate_rows = []
+            for rr in rate_rows:
+                code = rr.get("item_code")
+                if code and code not in item_last_purchase_rate_map:
+                    item_last_purchase_rate_map[code] = to_float(rr.get("rate"))
+
         grouped = {}
         for r in rows:
             item_code = r.get("item_code")
@@ -1546,6 +1566,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                     "pending_po_qty": 0,
                     "wastage_pct": 0,
                     "wastage_qty": 0,
+                    "last_purchase_rate": to_float(item_last_purchase_rate_map.get(item_code)),
                 }
     
             grouped[key]["qty_per_bom"] = to_float(grouped[key].get("qty_per_bom")) + to_float(r.get("qty_per_bom"))
