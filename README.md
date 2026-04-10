@@ -70,14 +70,64 @@ bench restart
 Important:
 - Use `/home/frappe/frappe-bench` for all commands on this setup.
 
-### Multi-Site Example (`ah.frappe.my`)
+### Clean Server Update Checklist
+
+Use this when updating the app on another server and you want Sales Order changes to load cleanly.
+
+1. Go to the app folder:
+
+```bash
+cd /home/frappe/frappe-bench/apps/order_tracking_report
+```
+
+2. Pull the latest code:
+
+```bash
+git pull origin main
+```
+
+3. Go back to bench folder:
+
+```bash
+cd /home/frappe/frappe-bench
+```
+
+4. Run migrate on the target site:
+
+```bash
+bench --site site1.local migrate
+```
+
+5. Clear cache:
+
+```bash
+bench --site site1.local clear-cache
+```
+
+6. Restart services:
+
+```bash
+bench restart
+```
+
+7. Verify in ERPNext:
+
+- Open `Sales Order`
+- Confirm custom fields are visible
+- Confirm Sales Order custom JS is loading correctly
+- Confirm default ERPNext buttons like `Create` and `Update Items` still show
+- Confirm report and related Sales Order actions work as expected
+
+If the server is installing this app for the first time, use the Installation section above instead of only this checklist.
+
+### Other Site Example (`site2.local`)
 
 ```bash
 cd /home/frappe/frappe-bench/apps/order_tracking_report
 git pull origin main
 cd /home/frappe/frappe-bench
-bench --site ah.frappe.my migrate
-bench --site ah.frappe.my clear-cache
+bench --site site2.local migrate
+bench --site site2.local clear-cache
 bench restart
 ```
 
