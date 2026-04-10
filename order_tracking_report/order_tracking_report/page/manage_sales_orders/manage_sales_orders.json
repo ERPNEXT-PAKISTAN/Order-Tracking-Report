@@ -7,13 +7,13 @@
  "modified": "2026-04-11 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Order Tracking Report",
- "name": "existing-manufacturing-documents",
+ "name": "manage-sales-orders",
  "owner": "Administrator",
- "page_name": "existing-manufacturing-documents",
+ "page_name": "manage-sales-orders",
  "roles": [],
  "script": null,
  "standard": "Yes",
  "style": null,
  "system_page": 0,
- "title": "Existing Manufacturing Documents"
+ "title": "Manage Sales Orders"
 }

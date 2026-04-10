@@ -104,13 +104,13 @@ frappe.ui.form.on("Sales Order", {
       frappe.set_route("sales-order-status-board");
     }, __("View"));
 
-    frm.add_custom_button(__("Existing Manufacturing Documents"), () => {
+    frm.add_custom_button(__("Manage Sales Orders"), () => {
       frappe.route_options = {
         sales_order: frm.doc.name,
         company: frm.doc.company || "",
         customer: frm.doc.customer || "",
       };
-      frappe.set_route("existing-manufacturing-documents");
+      frappe.set_route("manage-sales-orders");
     }, __("View"));
 
     frm.trigger("render_execution_dashboard");
@@ -168,6 +168,53 @@ frappe.ui.form.on("Sales Order", {
 });
 
 function esc(s){ return frappe.utils.escape_html(s == null ? "" : String(s)); }
+let liveWorkOrderBridgePromise = null;
+
+function ensureLiveWorkOrderBridge() {
+  if (window.openExistingManufacturingManager) {
+    return Promise.resolve();
+  }
+  if (liveWorkOrderBridgePromise) {
+    return liveWorkOrderBridgePromise;
+  }
+
+  liveWorkOrderBridgePromise = frappe.call({
+    method: "order_tracking_report.api.get_custom_html_block_page_payload",
+    args: { block_name: "Live Work Order" },
+  }).then((response) => {
+    if (window.openExistingManufacturingManager) {
+      return;
+    }
+
+    let host = document.getElementById("otr-live-work-order-bridge-host");
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "otr-live-work-order-bridge-host";
+      host.style.position = "absolute";
+      host.style.left = "-99999px";
+      host.style.top = "-99999px";
+      host.style.width = "1px";
+      host.style.height = "1px";
+      host.style.overflow = "hidden";
+      document.body.appendChild(host);
+    }
+
+    const payload = response.message || {};
+    host.innerHTML = payload.html || "";
+    const script = document.createElement("script");
+    script.type = "text/javascript";
+    script.text = [
+      "var root_element = document.getElementById('live_production_root') || document;",
+      payload.script || "",
+    ].join("\n");
+    host.appendChild(script);
+  }).catch((error) => {
+    liveWorkOrderBridgePromise = null;
+    throw error;
+  });
+
+  return liveWorkOrderBridgePromise;
+}
 function slug(doctype){ return String(doctype||"").toLowerCase().split(" ").join("-"); }
 function num(v){ return v == null ? 0 : v; }
 function soFlt(v){ return frappe.format ? frappe.format(v || 0, {fieldtype:"Float"}) : (v || 0); }
@@ -3645,16 +3692,25 @@ function bindDashboardActionButtons($wrap, frm, data){
   };
 
   const openExistingDocsDialog = (seed) => {
-    frappe.route_options = {
-      sales_order: seed.sales_order || frm.doc.name || "",
-      company: seed.company || frm.doc.company || "",
-      customer: seed.customer || frm.doc.customer || "",
-      item_code: seed.item_code || "",
-      production_plan: seed.production_plan || "",
-      work_order: seed.work_order || "",
-      job_card: seed.job_card || "",
-    };
-    frappe.set_route("existing-manufacturing-documents");
+    ensureLiveWorkOrderBridge().then(() => {
+      const handler = window.openExistingManufacturingManager || (typeof openExistingManufacturingManager === "function" ? openExistingManufacturingManager : null);
+      if (!handler) {
+        frappe.show_alert({ message: __("Manage Existing Docs is not ready yet."), indicator: "orange" }, 4);
+        return;
+      }
+
+      handler({
+        sales_order: seed.sales_order || frm.doc.name || "",
+        company: seed.company || frm.doc.company || "",
+        customer: seed.customer || frm.doc.customer || "",
+        item_code: seed.item_code || "",
+        production_plan: seed.production_plan || "",
+        work_order: seed.work_order || "",
+        job_card: seed.job_card || "",
+      });
+    }).catch(() => {
+      frappe.show_alert({ message: __("Failed to load Manage Existing Docs."), indicator: "red" }, 5);
+    });
   };
 
   const openCurrentDocuments = (seed) => {

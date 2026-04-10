@@ -16,7 +16,8 @@ def ensure_sales_order_live_shortcuts():
     ensure_manufacturing_workspace_shortcut()
     ensure_manufacturing_live_work_order_shortcut()
     ensure_manufacturing_sales_order_status_board_shortcut()
-    ensure_manufacturing_existing_docs_shortcut()
+    remove_workspace_page_shortcut("Manufacturing", "Existing Manufacturing Documents", "existing-manufacturing-documents")
+    ensure_manufacturing_manage_sales_orders_shortcut()
 
 
 def _ensure_workspace_page_shortcut(workspace_name, label, page_name, color):
@@ -94,6 +95,49 @@ def _ensure_workspace_page_shortcut(workspace_name, label, page_name, color):
         frappe.clear_document_cache("Workspace", workspace_name)
 
 
+def remove_workspace_page_shortcut(workspace_name, label, page_name):
+    if not frappe.db.exists("Workspace", workspace_name):
+        return
+
+    changed = False
+    shortcut_names = frappe.get_all(
+        "Workspace Shortcut",
+        filters={
+            "parent": workspace_name,
+            "parenttype": "Workspace",
+            "parentfield": "shortcuts",
+            "label": label,
+            "type": "Page",
+            "link_to": page_name,
+        },
+        pluck="name",
+    )
+    for shortcut_name in shortcut_names:
+        frappe.delete_doc("Workspace Shortcut", shortcut_name, ignore_permissions=True, force=True)
+        changed = True
+
+    try:
+        content = frappe.parse_json(frappe.db.get_value("Workspace", workspace_name, "content")) or []
+    except Exception:
+        content = []
+
+    filtered_content = [
+        block
+        for block in content
+        if not (
+            block.get("type") == "shortcut"
+            and (block.get("data") or {}).get("shortcut_name") == label
+        )
+    ]
+
+    if len(filtered_content) != len(content):
+        frappe.db.set_value("Workspace", workspace_name, "content", frappe.as_json(filtered_content), update_modified=False)
+        changed = True
+
+    if changed:
+        frappe.clear_document_cache("Workspace", workspace_name)
+
+
 def ensure_manufacturing_workspace_shortcut():
     _ensure_workspace_page_shortcut("Manufacturing", "Sales Order Live", "sales-order-live", "blue")
 
@@ -108,9 +152,9 @@ def ensure_manufacturing_sales_order_status_board_shortcut():
     )
 
 
-def ensure_manufacturing_existing_docs_shortcut():
+def ensure_manufacturing_manage_sales_orders_shortcut():
     _ensure_workspace_page_shortcut(
-        "Manufacturing", "Existing Manufacturing Documents", "existing-manufacturing-documents", "cyan"
+        "Manufacturing", "Manage Sales Orders", "manage-sales-orders", "cyan"
     )
 
 
