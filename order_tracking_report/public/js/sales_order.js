@@ -95,6 +95,24 @@ frappe.ui.form.on("Sales Order", {
       openAllRelatedLinksDialog(frm);
     }, __("View"));
 
+    frm.add_custom_button(__("Sales Order Status Board"), () => {
+      frappe.route_options = {
+        sales_order: frm.doc.name,
+        company: frm.doc.company || "",
+        customer: frm.doc.customer || "",
+      };
+      frappe.set_route("sales-order-status-board");
+    }, __("View"));
+
+    frm.add_custom_button(__("Existing Manufacturing Documents"), () => {
+      frappe.route_options = {
+        sales_order: frm.doc.name,
+        company: frm.doc.company || "",
+        customer: frm.doc.customer || "",
+      };
+      frappe.set_route("existing-manufacturing-documents");
+    }, __("View"));
+
     frm.trigger("render_execution_dashboard");
   },
 
@@ -3627,153 +3645,16 @@ function bindDashboardActionButtons($wrap, frm, data){
   };
 
   const openExistingDocsDialog = (seed) => {
-    const d = new frappe.ui.Dialog({
-      title: __("Manage Existing Docs"),
-      size: "extra-large",
-      fields: [{ fieldtype: "HTML", fieldname: "body" }],
-    });
-    d.fields_dict.body.$wrapper.html(`<div style="padding:12px;color:#64748b;">${__("Loading current documents...")}</div>`);
-    d.show();
-
-    const relevantWorkOrders = [];
-    (data.production_tree || []).forEach((node) => {
-      (node.work_orders || []).forEach((wo) => {
-        if (!seed.item_code || String(wo.production_item || "").trim() === String(seed.item_code || "").trim()) {
-          relevantWorkOrders.push({
-            production_plan: (node.production_plan || {}).name || "",
-            production_plan_status: (node.production_plan || {}).status || "",
-            work_order: wo.name || "",
-            work_order_status: wo.status || "",
-            job_cards: wo.job_cards || [],
-          });
-        }
-      });
-    });
-
-    const ppNames = [...new Set(relevantWorkOrders.map((row) => row.production_plan).filter(Boolean))];
-    const woNames = [...new Set(relevantWorkOrders.map((row) => row.work_order).filter(Boolean))];
-    const jcNames = [...new Set(relevantWorkOrders.flatMap((row) => (row.job_cards || []).map((jc) => jc.name).filter(Boolean)))];
-
-    const ppRows = ppNames.map((name) => ({ name, status: relevantWorkOrders.find((row) => row.production_plan === name)?.production_plan_status || "" }));
-    const woRows = woNames.map((name) => ({ name, status: relevantWorkOrders.find((row) => row.work_order === name)?.work_order_status || "" }));
-    const jcRows = relevantWorkOrders.flatMap((row) => row.job_cards || []);
-
-    const ppHtml = ppRows.length ? `
-      <div style="margin-top:12px;font-weight:900;color:#0f172a;">${__("Production Plans")}</div>
-      <div class="table-responsive" style="margin-top:8px;">
-        <table class="table table-bordered so-table" style="margin:0;">
-          <thead><tr><th>${__("Production Plan")}</th><th>${__("Status")}</th><th style="width:220px;">${__("Actions")}</th></tr></thead>
-          <tbody>
-            ${ppRows.map((row) => `
-              <tr>
-                <td>${docLink("Production Plan", row.name)}</td>
-                <td>${badge(row.status)}</td>
-                <td><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn btn-xs btn-default" data-open-doc="Production Plan" data-docname="${esc(row.name)}">${__("Open")}</button><button class="btn btn-xs btn-primary" data-pp-submit="${esc(row.name)}">${__("Submit")}</button></div></td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </div>` : "";
-
-    const woHtml = woRows.length ? `
-      <div style="margin-top:12px;font-weight:900;color:#0f172a;">${__("Work Orders")}</div>
-      <div class="table-responsive" style="margin-top:8px;">
-        <table class="table table-bordered so-table" style="margin:0;">
-          <thead><tr><th>${__("Work Order")}</th><th>${__("Status")}</th><th style="width:280px;">${__("Actions")}</th></tr></thead>
-          <tbody>
-            ${woRows.map((row) => `
-              <tr>
-                <td>${docLink("Work Order", row.name)}</td>
-                <td>${badge(row.status)}</td>
-                <td><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn btn-xs btn-default" data-open-doc="Work Order" data-docname="${esc(row.name)}">${__("Open")}</button><button class="btn btn-xs btn-primary" data-wo-submit="${esc(row.name)}">${__("Submit")}</button><button class="btn btn-xs btn-warning" data-wo-next="mt" data-work-order="${esc(row.name)}">${__("Material Transfer")}</button><button class="btn btn-xs btn-success" data-wo-next="mfg" data-work-order="${esc(row.name)}">${__("Manufacture")}</button></div></td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </div>` : "";
-
-    const jcHtml = jcRows.length ? `
-      <div style="margin-top:12px;font-weight:900;color:#0f172a;">${__("Job Cards")}</div>
-      <div class="table-responsive" style="margin-top:8px;">
-        <table class="table table-bordered so-table" style="margin:0;">
-          <thead><tr><th>${__("Job Card")}</th><th>${__("Status")}</th><th>${__("Operation")}</th><th style="width:320px;">${__("Actions")}</th></tr></thead>
-          <tbody>
-            ${jcRows.map((row) => {
-              const status = String(row.status || "").toLowerCase();
-              return `
-                <tr>
-                  <td>${docLink("Job Card", row.name)}</td>
-                  <td>${badge(row.status)}</td>
-                  <td>${esc(row.operation || "")}</td>
-                  <td><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn btn-xs btn-default" data-open-doc="Job Card" data-docname="${esc(row.name)}">${__("Open")}</button>${status === "open" || status === "material transferred" ? `<button class="btn btn-xs btn-success" data-jc-dialog="start" data-job-card="${esc(row.name)}">${__("Start Job")}</button>` : ""}${status === "work in progress" ? `<button class="btn btn-xs btn-warning" data-jc-dialog="pause" data-job-card="${esc(row.name)}">${__("Pause Job")}</button><button class="btn btn-xs btn-primary" data-jc-dialog="complete" data-job-card="${esc(row.name)}">${__("Complete Job")}</button>` : ""}</div></td>
-                </tr>`;
-            }).join("")}
-          </tbody>
-        </table>
-      </div>` : "";
-
-    d.fields_dict.body.$wrapper.html(`
-      <div style="padding:4px;">
-        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:12px;">
-          <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;"><div style="font-size:11px;color:#64748b;">${__("Company")}</div><div style="font-weight:800;color:#1e293b;">${esc(seed.company || frm.doc.company || "-")}</div></div>
-          <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;"><div style="font-size:11px;color:#64748b;">${__("Sales Order")}</div><div style="font-weight:800;color:#1e293b;">${esc(seed.sales_order || frm.doc.name || "-")}</div></div>
-          <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;"><div style="font-size:11px;color:#64748b;">${__("Production Plan")}</div><div style="font-weight:800;color:#1e293b;">${esc(seed.production_plan || "-")}</div></div>
-          <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;"><div style="font-size:11px;color:#64748b;">${__("Work Order")}</div><div style="font-weight:800;color:#1e293b;">${esc(seed.work_order || "-")}</div></div>
-          <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;"><div style="font-size:11px;color:#64748b;">${__("Item")}</div><div style="font-weight:800;color:#1e293b;">${esc(seed.item_code || "-")}</div></div>
-        </div>
-        <div style="padding:12px;border:1px solid #dbeafe;border-radius:12px;background:#eff6ff;color:#1d4ed8;font-size:12px;">
-          ${__("Draft Production Plans can be submitted here. Draft Work Orders can be submitted here. Open Job Cards can be started here; Work In Progress Job Cards can be paused or completed.")}
-        </div>
-        ${ppHtml}
-        ${woHtml}
-        ${jcHtml}
-      </div>
-    `);
-
-    const root = d.fields_dict.body.$wrapper;
-    root.find("[data-open-doc]").on("click", function() {
-      const doctype = $(this).attr("data-open-doc");
-      const name = $(this).attr("data-docname");
-      if (doctype && name) {
-        window.open(`/app/${slug(doctype)}/${encodeURIComponent(name)}`, "_blank");
-      }
-    });
-    root.find("[data-pp-submit]").on("click", async function() {
-      const name = $(this).attr("data-pp-submit");
-      try {
-        await submitExistingDoc("Production Plan", name);
-        frappe.show_alert({ message: __("Production Plan {0} submitted", [name]), indicator: "green" }, 5);
-        d.hide();
-        frm.trigger("render_execution_dashboard");
-      } catch (error) {
-        frappe.msgprint(__("Failed: {0}", [error.message || error]));
-      }
-    });
-    root.find("[data-wo-submit]").on("click", async function() {
-      const name = $(this).attr("data-wo-submit");
-      try {
-        await submitExistingDoc("Work Order", name);
-        frappe.show_alert({ message: __("Work Order {0} submitted", [name]), indicator: "green" }, 5);
-        d.hide();
-        frm.trigger("render_execution_dashboard");
-      } catch (error) {
-        frappe.msgprint(__("Failed: {0}", [error.message || error]));
-      }
-    });
-    root.find("[data-wo-next]").on("click", function() {
-      const name = $(this).attr("data-work-order");
-      const nextAction = $(this).attr("data-wo-next");
-      const nextSeed = { ...seed, work_order: name };
-      d.hide();
-      if (nextAction === "mt") openStockEntryCreator(nextSeed, "Material Transfer for Manufacture");
-      if (nextAction === "mfg") openStockEntryCreator(nextSeed, "Manufacture");
-    });
-    root.find("[data-jc-dialog]").on("click", function() {
-      const mode = $(this).attr("data-jc-dialog");
-      const name = $(this).attr("data-job-card");
-      d.hide();
-      openJobCardControlDialog(mode, name);
-    });
+    frappe.route_options = {
+      sales_order: seed.sales_order || frm.doc.name || "",
+      company: seed.company || frm.doc.company || "",
+      customer: seed.customer || frm.doc.customer || "",
+      item_code: seed.item_code || "",
+      production_plan: seed.production_plan || "",
+      work_order: seed.work_order || "",
+      job_card: seed.job_card || "",
+    };
+    frappe.set_route("existing-manufacturing-documents");
   };
 
   const openCurrentDocuments = (seed) => {
@@ -3805,7 +3686,7 @@ function bindDashboardActionButtons($wrap, frm, data){
       company: seed.company || frm.doc.company || "",
       customer: seed.customer || frm.doc.customer || "",
     };
-    frappe.set_route("sales-order-live");
+    frappe.set_route("sales-order-status-board");
   };
 
   const openActionCenterForItem = (item, defaultAction) => {
