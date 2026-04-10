@@ -30,7 +30,8 @@ frappe.ui.form.on("Sales Order", {
         bindToggles(f.$wrapper);
         bindPopupLinks(f.$wrapper);
         bindSectionToggles(f.$wrapper);
-        bindMaterialShortageCreatePo(f.$wrapper, frm);
+        bindMaterialShortageCreatePo(f.$wrapper, frm, data);
+        bindDashboardActionButtons(f.$wrapper, frm, data);
       },
       error: () => {
         f.$wrapper.html(`<div class="text-danger">Detail status dashboard is not available.</div>`);
@@ -2057,6 +2058,8 @@ function open_po_item_data_entry(frm, prefill) {
       { fieldtype: "Column Break" },
       { label: __("Warehouse"), fieldname: "warehouse", fieldtype: "Link", options: "Warehouse" },
       { fieldtype: "Column Break" },
+      { label: __("Rate"), fieldname: "rate", fieldtype: "Currency", default: 0 },
+      { fieldtype: "Column Break" },
       { label: __("Select for PO"), fieldname: "select_for_po", fieldtype: "Check", default: 1 },
       { fieldtype: "Section Break", label: __("Quick Add") },
       { label: __("Item"), fieldname: "item_code", fieldtype: "Link", options: "Item", reqd: 1 },
@@ -2088,6 +2091,7 @@ function open_po_item_data_entry(frm, prefill) {
           { fieldtype: "Data", fieldname: "item_name", label: __("Item Name"), in_list_view: 1, read_only: 1 },
           { fieldtype: "Data", fieldname: "supplier", label: __("Supplier"), in_list_view: 1, read_only: 1 },
           { fieldtype: "Data", fieldname: "warehouse", label: __("Warehouse"), in_list_view: 1, read_only: 1 },
+          { fieldtype: "Currency", fieldname: "rate", label: __("Rate"), in_list_view: 1 },
           { fieldtype: "Float", fieldname: "base_qty", label: __("Qty"), in_list_view: 1 },
           { fieldtype: "Float", fieldname: "custom_wastage_percentage", label: __("Wastage %"), in_list_view: 1 },
           { fieldtype: "Float", fieldname: "custom_wastage_qty", label: __("Wastage Qty"), in_list_view: 1 },
@@ -2141,7 +2145,7 @@ function open_po_item_data_entry(frm, prefill) {
     if (item_group) filters.item_group = item_group;
     const r = await frappe.call({
       method: "frappe.client.get_list",
-      args: { doctype: "Item", fields: ["name", "item_name", "description"], filters, order_by: "name asc", limit_page_length: 500 },
+      args: { doctype: "Item", fields: ["name", "item_name", "description", "default_warehouse", "last_purchase_rate"], filters, order_by: "name asc", limit_page_length: 500 },
     });
     const rows = (r && r.message) ? r.message : [];
     item_map = {};
@@ -2185,6 +2189,7 @@ function open_po_item_data_entry(frm, prefill) {
     const descriptions = dialog.get_value("descriptions") || "";
     const comments = dialog.get_value("comments") || "";
     const select_for_po = toInt(dialog.get_value("select_for_po"));
+    const rate = toNum(dialog.get_value("rate"));
     const custom_wastage_percentage = toNum(dialog.get_value("custom_wastage_percentage"));
     const custom_wastage_qty = (qty * custom_wastage_percentage) / 100;
     const extra_qty = toNum(dialog.get_value("extra_qty"));
@@ -2216,6 +2221,7 @@ function open_po_item_data_entry(frm, prefill) {
       item_name: item_meta.item_name || "",
       supplier,
       warehouse,
+      rate,
       base_qty: qty,
       qty: po_qty,
       descriptions: descriptions || stripHtml(item_meta.description || ""),
@@ -2249,6 +2255,8 @@ function open_po_item_data_entry(frm, prefill) {
     if (!code) return;
     const item_meta = item_map[code] || {};
     if (!dialog.get_value("descriptions") && item_meta.description) dialog.set_value("descriptions", stripHtml(item_meta.description));
+    if (!dialog.get_value("warehouse") && item_meta.default_warehouse) dialog.set_value("warehouse", item_meta.default_warehouse);
+    if (!toNum(dialog.get_value("rate")) && toNum(item_meta.last_purchase_rate)) dialog.set_value("rate", toNum(item_meta.last_purchase_rate));
   };
 
   function bind_add_row_button() {
@@ -2285,6 +2293,7 @@ function open_po_item_data_entry(frm, prefill) {
       row.item = r.item_code;
       row.supplier = r.supplier || "";
       row.warehouse = r.warehouse || "";
+      row.rate = toNum(r.rate);
       row.qty = toNum(r.po_qty || r.qty);
       row.custom_base_qty = toNum(r.base_qty);
       row.descriptions = r.descriptions || "";
@@ -2326,8 +2335,36 @@ function open_po_item_data_entry(frm, prefill) {
     load_items();
     render_meta();
     if (prefill && typeof prefill === "object") {
+      if (Array.isArray(prefill.rows) && prefill.rows.length) {
+        prefill.rows.forEach((row) => {
+          const baseQty = toNum(row.base_qty || row.qty || 0);
+          const wp = toNum(row.custom_wastage_percentage || row.wastage_pct || 0);
+          const wq = toNum(row.custom_wastage_qty || row.wastage_qty || ((baseQty * wp) / 100));
+          const extra = toNum(row.extra_qty || 0);
+          const poQty = toNum(row.po_qty || (baseQty + wq + extra));
+          items_data.push({
+            item_code: row.item_code || "",
+            item_name: row.item_name || "",
+            supplier: row.supplier || dialog.get_value("supplier") || "",
+            warehouse: row.warehouse || dialog.get_value("warehouse") || "",
+            rate: toNum(row.rate || 0),
+            base_qty: baseQty,
+            qty: poQty,
+            descriptions: row.descriptions || row.description || row.item_code || "",
+            comments: row.comments || "",
+            select_for_po: toInt(typeof row.select_for_po !== "undefined" ? row.select_for_po : 1),
+            custom_wastage_percentage: wp,
+            custom_wastage_qty: wq,
+            extra_qty: extra,
+            po_qty: poQty,
+          });
+        });
+        refresh_grid();
+      }
       if (prefill.item_code) dialog.set_value("item_code", prefill.item_code);
+      if (prefill.supplier) dialog.set_value("supplier", prefill.supplier);
       if (prefill.warehouse) dialog.set_value("warehouse", prefill.warehouse);
+      if (typeof prefill.rate !== "undefined") dialog.set_value("rate", flt(prefill.rate));
       if (prefill.qty) dialog.set_value("qty", flt(prefill.qty));
       if (prefill.descriptions) dialog.set_value("descriptions", prefill.descriptions);
       if (typeof prefill.select_for_po !== "undefined") dialog.set_value("select_for_po", cint(prefill.select_for_po) ? 1 : 0);
@@ -2407,7 +2444,9 @@ function materialShortageTable(rows){
         <td style="text-align:right;">${_n0(wsp)}</td>
         <td style="text-align:right;">${_n0(prq)}</td>
         <td style="text-align:right;" class="${ppq>0?'so-warning':'so-success'}">${_n0(ppq)}</td>
-        <td></td>
+        <td>
+          ${suggested > 0 ? `<button class="btn btn-xs btn-primary" data-ms-create-po-group="1" data-group="${esc(g)}">${__("Create PO")}</button>` : `<span class="text-muted">-</span>`}
+        </td>
       </tr>
     `;
     list.forEach((r) => {
@@ -2860,6 +2899,281 @@ function poAnalyticsSection(data){
   `;
 }
 
+function _firstProductionPointers(data){
+  const tree = data.production_tree || [];
+  let pp = "", wo = "", item = "";
+  for (let i = 0; i < tree.length; i++) {
+    const node = tree[i] || {};
+    if (!pp && node.production_plan && node.production_plan.name && node.production_plan.name !== "Unassigned") pp = node.production_plan.name;
+    const ws = node.work_orders || [];
+    for (let j = 0; j < ws.length; j++) {
+      const w = ws[j] || {};
+      if (!wo && w.name) wo = w.name;
+      if (!item && w.production_item) item = w.production_item;
+    }
+  }
+  return { pp, wo, item };
+}
+
+function _planningRows(data){
+  const soRows = data.order_item_summary || [];
+  const tree = data.production_tree || [];
+  const itemMap = {};
+  tree.forEach((ppNode) => {
+    const ppName = ((ppNode || {}).production_plan || {}).name || "";
+    const ppStatus = ((ppNode || {}).production_plan || {}).status || "";
+    ((ppNode || {}).work_orders || []).forEach((wo) => {
+      const k = String((wo.production_item || wo.item_code || wo.item_name || "")).trim();
+      if (!k) return;
+      if (!itemMap[k]) itemMap[k] = { pp: [], pp_statuses: [], wo: [], wo_statuses: [], jc: [], jc_statuses: [] };
+      if (ppName && itemMap[k].pp.indexOf(ppName) === -1) itemMap[k].pp.push(ppName);
+      if (ppStatus) itemMap[k].pp_statuses.push(ppStatus);
+      if (wo.name && itemMap[k].wo.indexOf(wo.name) === -1) itemMap[k].wo.push(wo.name);
+      if (wo.status) itemMap[k].wo_statuses.push(wo.status);
+      (wo.job_cards || []).forEach((jc) => {
+        if (jc.name && itemMap[k].jc.indexOf(jc.name) === -1) itemMap[k].jc.push(jc.name);
+        if (jc.status) itemMap[k].jc_statuses.push(jc.status);
+      });
+    });
+  });
+
+  return soRows.map((r, idx) => {
+    const k = String(r.item_code || r.item_name || "").trim();
+    const m = itemMap[k] || { pp: [], pp_statuses: [], wo: [], wo_statuses: [], jc: [], jc_statuses: [] };
+    return {
+      idx: idx + 1,
+      item_code: r.item_code || "",
+      item_name: r.item_name || r.item_code || "",
+      ordered_qty: Number(r.ordered_qty || 0),
+      delivered_qty: Number(r.delivered_qty || 0),
+      pending_qty: Number(r.pending_qty || 0),
+      pp_list: m.pp,
+      pp_statuses: m.pp_statuses,
+      wo_list: m.wo,
+      wo_statuses: m.wo_statuses,
+      jc_list: m.jc,
+      jc_statuses: m.jc_statuses,
+    };
+  });
+}
+
+function _statusChip(hasAny, allDone){
+  if (!hasAny) return `<span class="badge badge-secondary">Not Created</span>`;
+  return allDone ? `<span class="badge badge-success">Completed</span>` : `<span class="badge badge-warning">In Progress</span>`;
+}
+
+function _allDoneStatus(statuses){
+  const arr = (statuses || []).map((s) => String(s || "").toLowerCase());
+  if (!arr.length) return false;
+  return arr.every((s) => s.includes("complete") || s.includes("closed"));
+}
+
+function salesOrderItemsPlanningTable(data){
+  const rows = _planningRows(data);
+  const body = rows.length ? rows.map((r) => {
+    const ppDone = _allDoneStatus(r.pp_statuses);
+    const woDone = _allDoneStatus(r.wo_statuses);
+    const jcDone = _allDoneStatus(r.jc_statuses);
+    return `
+      <tr>
+        <td style="text-align:center;">${r.idx}</td>
+        <td style="min-width:210px;"><b>${esc(r.item_name)}</b><div class="muted">${esc(r.item_code)}</div></td>
+        <td style="text-align:right;">${_n0(r.ordered_qty)}</td>
+        <td style="text-align:right;">${_n0(r.delivered_qty)}</td>
+        <td style="text-align:right;">${_n0(r.pending_qty)}</td>
+        <td>${_statusChip(r.pp_list.length > 0, ppDone)}</td>
+        <td>${_statusChip(r.wo_list.length > 0, woDone)}</td>
+        <td>${_statusChip(r.jc_list.length > 0, jcDone)}</td>
+        <td style="white-space:nowrap;">
+          <button class="btn btn-xs btn-info" data-plan-action="pp" data-item="${esc(r.item_code)}">PP</button>
+          <button class="btn btn-xs btn-dark" data-plan-action="wo" data-item="${esc(r.item_code)}">WO</button>
+          <button class="btn btn-xs btn-warning" data-plan-action="mt" data-item="${esc(r.item_code)}">MT</button>
+          <button class="btn btn-xs btn-secondary" data-plan-action="mfg" data-item="${esc(r.item_code)}">MFG</button>
+          <button class="btn btn-xs btn-success" data-plan-action="dn" data-item="${esc(r.item_code)}">DN</button>
+          <button class="btn btn-xs btn-default" data-plan-action="view" data-item="${esc(r.item_code)}">View</button>
+        </td>
+      </tr>
+    `;
+  }).join("") : `<tr><td colspan="9" class="text-muted">No item planning rows found.</td></tr>`;
+
+  return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;">
+    <thead><tr><th style="width:44px;">#</th><th style="min-width:210px;">Item</th><th style="text-align:right;">Ordered Qty</th><th style="text-align:right;">Delivered</th><th style="text-align:right;">Pending</th><th>Production Plan</th><th>Work Order</th><th>Job Card</th><th>Actions</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+
+function manufacturingControlCenter(frm, data){
+  const p = _firstProductionPointers(data);
+  const totals = data.production_totals || {};
+  const woOpen = (data.production_tree || []).reduce((a, n) => a + ((n.work_orders || []).length), 0);
+  const jcTotal = (data.production_tree || []).reduce((a, n) => a + ((n.work_orders || []).reduce((x, w) => x + ((w.job_cards || []).length), 0)), 0);
+  const completedPct = Number(totals.completion_pct || 0);
+  return `
+    <div class="so-card" style="border-color:#c7d2fe;">
+      <div class="so-card-h"><div class="t">Manufacturing Control Center</div><div class="s">Same logic style with Live Work Order integration</div></div>
+      <div class="so-card-b">
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;">
+          <div class="so-mini-card"><div class="so-mini-title">Company</div><div class="so-mini-val">${esc(frm.doc.company || "-")}</div></div>
+          <div class="so-mini-card"><div class="so-mini-title">Sales Order</div><div class="so-mini-val">${esc(frm.doc.name || "-")}</div></div>
+          <div class="so-mini-card"><div class="so-mini-title">Production Plan</div><div class="so-mini-val">${esc(p.pp || "—")}</div></div>
+          <div class="so-mini-card"><div class="so-mini-title">Work Order</div><div class="so-mini-val">${esc(p.wo || "—")}</div></div>
+          <div class="so-mini-card"><div class="so-mini-title">Items</div><div class="so-mini-val">${esc(p.item || "Multiple")}</div></div>
+        </div>
+        <div style="margin-top:10px;padding:10px;border:1px solid #bfdbfe;border-radius:10px;background:#eff6ff;color:#1d4ed8;font-weight:700;">
+          Recommended flow: Sales Order -> Production Plan -> Submit Plan -> Create/Submit Work Order -> Material Transfer -> Start/Pause/Complete Job Cards -> Manufacture/Return Material.
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:10px;">
+          <div class="so-mini-card">
+            <div class="so-mini-title" style="font-size:11px;">WORK ORDERS</div>
+            <div class="so-mini-val" style="font-size:14px;">${_n0(woOpen)}</div>
+            <div class="muted" style="font-size:11px;">${_n0(woOpen)} open / in progress</div>
+          </div>
+          <div class="so-mini-card">
+            <div class="so-mini-title" style="font-size:11px;">MATERIAL TRANSFER</div>
+            <div class="so-mini-val" style="font-size:14px;">${completedPct.toFixed(1)}%</div>
+          </div>
+          <div class="so-mini-card">
+            <div class="so-mini-title" style="font-size:11px;">JOB CARDS</div>
+            <div class="so-mini-val" style="font-size:14px;">${_n0(jcTotal)}</div>
+            <div class="muted" style="font-size:11px;">completed / total</div>
+          </div>
+          <div class="so-mini-card">
+            <div class="so-mini-title" style="font-size:11px;">MANUFACTURE</div>
+            <div class="so-mini-val" style="font-size:14px;">${completedPct.toFixed(1)}%</div>
+          </div>
+          <div class="so-mini-card">
+            <div class="so-mini-title" style="font-size:11px;">DELIVERY</div>
+            <div class="so-mini-val" style="font-size:14px;">${_n0((data.order_item_summary || []).reduce((a, r) => a + Number(r.delivered_qty || 0), 0))}</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px;">
+          <button class="btn btn-sm btn-success" data-so-action="create_sales_order">Create Sales Order</button>
+          <button class="btn btn-sm btn-info" data-so-action="create_production_plan">Create Production Plan</button>
+          <button class="btn btn-sm btn-dark" data-so-action="create_work_order">Create Work Order</button>
+          <button class="btn btn-sm btn-secondary" data-so-action="manage_docs">Manage Existing Docs</button>
+          <button class="btn btn-sm btn-warning" data-so-action="create_material_transfer">Material Transfer</button>
+          <button class="btn btn-sm btn-primary" data-so-action="create_manufacture_entry">Manufacture Entry</button>
+          <button class="btn btn-sm btn-success" data-so-action="create_delivery_note">Create Delivery Note</button>
+          <button class="btn btn-sm btn-secondary" data-so-action="return_disassemble">Return / Disassemble</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bindDashboardActionButtons($wrap, frm){
+  const openNew = (doctype, routeOptions) => {
+    frappe.route_options = routeOptions || {};
+    frappe.new_doc(doctype);
+  };
+
+  $wrap.find("[data-so-action]").off("click").on("click", function(){
+    const action = $(this).attr("data-so-action");
+    const common = { sales_order: frm.doc.name, company: frm.doc.company };
+    if (action === "create_sales_order") openNew("Sales Order", { company: frm.doc.company });
+    else if (action === "create_production_plan") openNew("Production Plan", { get_items_from: "Sales Order", sales_order: frm.doc.name, company: frm.doc.company });
+    else if (action === "create_work_order") openNew("Work Order", { sales_order: frm.doc.name, company: frm.doc.company });
+    else if (action === "create_material_transfer") openNew("Stock Entry", { stock_entry_type: "Material Transfer for Manufacture", ...common });
+    else if (action === "create_manufacture_entry") openNew("Stock Entry", { stock_entry_type: "Manufacture", ...common });
+    else if (action === "create_delivery_note") openNew("Delivery Note", { against_sales_order: frm.doc.name, ...common });
+    else if (action === "return_disassemble") openNew("Stock Entry", { stock_entry_type: "Material Transfer", purpose: "Material Transfer", ...common });
+    else if (action === "manage_docs") frappe.set_route("query-report", "Purchase Order updated Status");
+  });
+
+  $wrap.find("[data-plan-action]").off("click").on("click", function(){
+    const action = $(this).attr("data-plan-action");
+    const item = ($(this).attr("data-item") || "").trim();
+    if (action === "pp") {
+      frappe.route_options = { get_items_from: "Sales Order", sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
+      frappe.new_doc("Production Plan");
+    } else if (action === "wo") {
+      frappe.route_options = { sales_order: frm.doc.name, production_item: item, company: frm.doc.company };
+      frappe.new_doc("Work Order");
+    } else if (action === "mt") {
+      frappe.route_options = { stock_entry_type: "Material Transfer for Manufacture", sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
+      frappe.new_doc("Stock Entry");
+    } else if (action === "mfg") {
+      frappe.route_options = { stock_entry_type: "Manufacture", sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
+      frappe.new_doc("Stock Entry");
+    } else if (action === "dn") {
+      frappe.route_options = { against_sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
+      frappe.new_doc("Delivery Note");
+    } else if (action === "view") {
+      frappe.show_alert({ message: __("Use Production Details table below for linked docs of item: {0}", [item || "-"]), indicator: "blue" }, 5);
+    }
+  });
+}
+
+function bindMaterialShortageCreatePo($wrap, frm, data){
+  const soPoRows = (frm.doc.custom_po_item || []);
+  const itemDefaults = {};
+  soPoRows.forEach((r) => {
+    const k = String(r.item || "").trim();
+    if (!k) return;
+    itemDefaults[k] = {
+      supplier: r.supplier || "",
+      warehouse: r.warehouse || "",
+      rate: Number(r.rate || 0),
+      custom_wastage_percentage: Number(r.custom_wastage_percentage || 0),
+      custom_wastage_qty: Number(r.custom_wastage_qty || 0),
+      extra_qty: Number(r.custom_extra_qty || 0),
+    };
+  });
+
+  $wrap.find("[data-ms-create-po='1']").off("click").on("click", function(e){
+    e.preventDefault();
+    const item = ($(this).attr("data-item") || "").trim();
+    const defaultQty = flt($(this).attr("data-qty") || 0);
+    const description = ($(this).attr("data-description") || "").trim();
+    const wp = flt($(this).attr("data-wp") || 0);
+    const wq = flt($(this).attr("data-wq") || 0);
+    if (!item || defaultQty <= 0) {
+      frappe.msgprint(__("Invalid row for Create PO."));
+      return;
+    }
+    const d = itemDefaults[item] || {};
+    open_po_item_data_entry(frm, {
+      item_code: item,
+      qty: defaultQty,
+      descriptions: description || item,
+      select_for_po: 1,
+      supplier: d.supplier || "",
+      warehouse: d.warehouse || "",
+      rate: Number(d.rate || 0),
+      custom_wastage_percentage: wp || Number(d.custom_wastage_percentage || 0),
+      custom_wastage_qty: wq || Number(d.custom_wastage_qty || 0),
+      extra_qty: Number(d.extra_qty || 0),
+    });
+  });
+
+  $wrap.find("[data-ms-create-po-group='1']").off("click").on("click", function(e){
+    e.preventDefault();
+    const group = ($(this).attr("data-group") || "").trim();
+    if (!group) return;
+    const rows = (data.material_shortage || []).filter((r) => (r.item_group || "") === group && Number(r.shortage_qty || 0) > 0);
+    if (!rows.length) {
+      frappe.msgprint(__("No shortage rows found for this Item Group."));
+      return;
+    }
+    const prefillRows = rows.map((r) => ({
+      ...(itemDefaults[r.item_code || ""] || {}),
+      item_code: r.item_code || "",
+      qty: Number(r.shortage_qty || 0),
+      base_qty: Number(r.required_qty || 0),
+      custom_wastage_percentage: Number(r.wastage_pct || 0),
+      custom_wastage_qty: Number(r.wastage_qty || 0),
+      po_qty: Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0),
+      descriptions: r.item_code || "",
+      select_for_po: 1,
+    })).filter((r) => r.item_code && r.qty > 0);
+
+    if (!prefillRows.length) {
+      frappe.msgprint(__("No valid rows found for Create PO."));
+      return;
+    }
+    open_po_item_data_entry(frm, { rows: prefillRows, select_for_po: 1 });
+  });
+}
+
 function buildDashboard(frm, data){
   const totals = data.production_totals || {};
   const poTotal = poTotalAmount(data.po_item_group_summary || []);
@@ -2872,11 +3186,7 @@ function buildDashboard(frm, data){
     </div>
 
     ${sectionBlock('profit', 'Profit and Loss Section', 'linear-gradient(90deg,#0f766e,#14b8a6)', `
-      ${card("Profit Dashboard", "Estimated cost from default BOM and sales amount", `
-        ${profitSummaryCard(data.profit_summary || {})}
-        <div style="margin-top:12px;font-weight:900;">Profit by Item</div>
-        ${profitByItemTable(data.profit_by_item || [])}
-      `)}
+      ${card("Profit Dashboard", "Estimated cost from default BOM and sales amount", `${profitSummaryCard(data.profit_summary || {})}<div style="margin-top:12px;font-weight:900;">Profit by Item</div>${profitByItemTable(data.profit_by_item || [])}`)}
       ${card("Purchase Order Total Amount", "Total amount of Purchase Orders linked with this Sales Order", `<div class="so-mini-card"><div class="so-mini-title">TOTAL PO AMOUNT</div><div class="so-mini-val" style="font-size:26px;">${_money0(poTotal)}</div></div>`)}
       ${card("PO Amount by Item Group", "Purchase Order amount summary linked with this Sales Order", profitGroupPurchaseTable(data.po_item_group_summary || []))}
       ${card("Employee Item-wise Labour Cost", "From per-piece-report > Employee item-wise", labourCostTable(data.labour_cost_employee_item_wise || [], data.labour_cost_summary || {}))}
@@ -2890,15 +3200,15 @@ function buildDashboard(frm, data){
     `, false)}
 
     ${sectionBlock('production', 'Production Section', 'linear-gradient(90deg,#7a3e00,#a16207)', `
-      ${card("Production", "Production Plan -> Work Order -> Job Cards / Operations / Employees / Materials", productionTree(data.production_tree||[]))}
+      ${manufacturingControlCenter(frm, data)}
+      ${card("Sales Order Items Planning", "Planning overview by Sales Order item", salesOrderItemsPlanningTable(data))}
+      ${card("Production Details", "Job Card / Operation / Material details", productionTree(data.production_tree||[]))}
       ${card("Production Timeline", "Work Orders, Delivery Notes and Invoices timeline", timelineView(data.gantt_timeline || []))}
       ${card("Machine Utilization", "Workstation time from Job Card Time Logs", machineUtilization(data.machine_utilization || []))}
       ${card("Employee Efficiency", "Completed quantity vs time spent", employeeEfficiency(data.employee_efficiency || []))}
     `, false)}
 
-    ${sectionBlock('bom', 'BOM and Raw Material Section', 'linear-gradient(90deg,#0891b2,#06b6d4)', `
-      ${card("BOM & Raw Materials", "Item and BOM merged for easier reading", bomTree(data.bom_tree||[]))}
-    `, false)}
+    ${sectionBlock('bom', 'BOM and Raw Material Section', 'linear-gradient(90deg,#0891b2,#06b6d4)', `${card("BOM & Raw Materials", "Item and BOM merged for easier reading", bomTree(data.bom_tree||[]))}`, false)}
 
     ${sectionBlock('dispatch', 'Dispatch Section', 'linear-gradient(90deg,#ea580c,#f97316)', `
       ${card("Order Item Summary", "Ordered, delivered, invoiced and pending quantity by item", orderItemSummaryTable(data.order_item_summary || []))}

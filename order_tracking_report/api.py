@@ -214,6 +214,7 @@ def create_po_from_sales_order_po_tab(source_name=None, row_names=None):
                     "custom_extra_qty": frappe.utils.flt(row.get("custom_extra_qty") or 0),
                     "custom_po_qty": frappe.utils.flt(row.get("custom_po_qty") or row.qty or 0),
                     "qty": row.qty,
+                    "rate": frappe.utils.flt(row.get("rate") or 0),
                     "warehouse": (row.get("warehouse") or "").strip(),
                     "schedule_date": effective_schedule_date,
                     "uom": purchase_uom,
@@ -247,7 +248,18 @@ def create_po_from_sales_order_po_tab(source_name=None, row_names=None):
 
 
 @frappe.whitelist()
-def create_po_from_material_shortage_line(source_name=None, item_code=None, qty=None, supplier=None, description=None):
+def create_po_from_material_shortage_line(
+    source_name=None,
+    item_code=None,
+    qty=None,
+    supplier=None,
+    description=None,
+    warehouse=None,
+    rate=None,
+    wastage_pct=None,
+    wastage_qty=None,
+    extra_qty=None,
+):
     if not source_name:
         frappe.throw("Sales Order is required")
     if not item_code:
@@ -266,8 +278,12 @@ def create_po_from_material_shortage_line(source_name=None, item_code=None, qty=
     row.custom_wastage_percentage = 0
     row.custom_wastage_qty = 0
     row.custom_extra_qty = 0
+    row.rate = frappe.utils.flt(rate or 0)
     row.supplier = supplier
-    row.warehouse = ""
+    row.warehouse = (warehouse or "").strip()
+    row.custom_wastage_percentage = frappe.utils.flt(wastage_pct or 0)
+    row.custom_wastage_qty = frappe.utils.flt(wastage_qty or 0)
+    row.custom_extra_qty = frappe.utils.flt(extra_qty or 0)
     row.descriptions = (description or "").strip()
     row.select_for_po = 1
     so.save(ignore_permissions=True)
