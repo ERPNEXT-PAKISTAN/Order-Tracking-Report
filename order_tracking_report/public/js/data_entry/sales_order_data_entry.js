@@ -387,6 +387,65 @@
 					};
 				}
 
+				async function get_customer_item_price(item_code, customer) {
+					if (!item_code) return 0;
+					const price_list = frm.doc.selling_price_list || '';
+					const fetch_one = async (filters) => {
+						const r = await frappe.call({
+							method: 'frappe.client.get_list',
+							args: {
+								doctype: 'Item Price',
+								fields: ['name', 'price_list_rate', 'price_list', 'customer'],
+								filters,
+								order_by: 'modified desc',
+								limit_page_length: 1
+							}
+						});
+						const row = (r && r.message && r.message[0]) || null;
+						return row ? flt(row.price_list_rate) : 0;
+					};
+
+					if (customer && price_list) {
+						const exact = await fetch_one({
+							item_code: item_code,
+							customer: customer,
+							price_list: price_list,
+							selling: 1
+						});
+						if (exact > 0) return exact;
+					}
+					if (customer) {
+						const by_customer = await fetch_one({
+							item_code: item_code,
+							customer: customer,
+							selling: 1
+						});
+						if (by_customer > 0) return by_customer;
+					}
+					if (price_list) {
+						const by_price_list = await fetch_one({
+							item_code: item_code,
+							price_list: price_list,
+							selling: 1
+						});
+						if (by_price_list > 0) return by_price_list;
+					}
+					return 0;
+				}
+
+				async function apply_customer_price(force_apply) {
+					const item_code = dialog.get_value('item_code');
+					if (!item_code) return;
+					const customer = DATA_ENTRY_CONFIG.party_field ? (dialog.get_value(DATA_ENTRY_CONFIG.party_field) || '') : '';
+					if (!force_apply && flt(dialog.get_value('rate'))) return;
+					const price = await get_customer_item_price(item_code, customer);
+					if (price > 0) {
+						dialog.set_value('rate', flt(price, RATE_PRECISION));
+						const qty = flt(dialog.get_value('qty')) || 1;
+						dialog.set_value('amount', flt(qty * price, AMT_PRECISION));
+					}
+				}
+
 				dialog.fields_dict.qty.df.onchange = function () {
 					const qty = flt(dialog.get_value('qty'));
 					const rate = flt(dialog.get_value('rate'));
@@ -445,6 +504,16 @@
 					await load_filtered_items(false);
 				};
 
+				dialog.fields_dict.item_code.df.onchange = async function () {
+					await apply_customer_price(false);
+				};
+
+				if (DATA_ENTRY_CONFIG.party_field && dialog.fields_dict[DATA_ENTRY_CONFIG.party_field]) {
+					dialog.fields_dict[DATA_ENTRY_CONFIG.party_field].df.onchange = async function () {
+						await apply_customer_price(true);
+					};
+				}
+
 				function update_totals() {
 					let total_qty = 0;
 					let total_amount = 0;
@@ -472,6 +541,14 @@
 					}
 					if ((!rate || rate === 0) && amount && qty) {
 						rate = flt(amount / qty, RATE_PRECISION);
+					}
+					if ((!rate || rate === 0) && DATA_ENTRY_CONFIG.party_field) {
+						rate = await get_customer_item_price(values.item_code, values[DATA_ENTRY_CONFIG.party_field] || '');
+						if (rate > 0 && (!amount || amount === 0)) {
+							amount = flt(qty * rate, AMT_PRECISION);
+							dialog.set_value('rate', rate);
+							dialog.set_value('amount', amount);
+						}
 					}
 					if ((!amount || amount === 0) && rate && qty) {
 						amount = flt(qty * rate, AMT_PRECISION);

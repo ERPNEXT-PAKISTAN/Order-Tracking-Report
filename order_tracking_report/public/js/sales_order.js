@@ -1916,6 +1916,8 @@ function open_po_item_data_entry(frm, prefill) {
       frappe.msgprint(__("Add at least one row."));
       return;
     }
+    const defaultSupplier = (dialog.get_value("supplier") || "").trim();
+    items_data = items_data.map((r) => Object.assign({}, r, { supplier: (r.supplier || defaultSupplier || "").trim() }));
     const missingSupplier = items_data.filter((r) => !(r.supplier || "").trim());
     if (missingSupplier.length) {
       frappe.msgprint(__("Supplier is required for all rows before insert."));
@@ -1957,6 +1959,65 @@ function open_po_item_data_entry(frm, prefill) {
   }, 120);
 }
 
+function ensure_default_sales_order_create_menu(frm) {
+  if (!frm || frm.doc.docstatus !== 1) return;
+
+  const callTrigger = (triggers, fallbackDoctype, fallbackOpts) => {
+    const names = Array.isArray(triggers) ? triggers : [triggers];
+    for (let i = 0; i < names.length; i++) {
+      const t = names[i];
+      if (t && frm.events && typeof frm.events[t] === "function") {
+        frm.trigger(t);
+        return;
+      }
+    }
+    if (fallbackDoctype) {
+      frappe.route_options = fallbackOpts || {};
+      frappe.new_doc(fallbackDoctype);
+    }
+  };
+
+  const common = { company: frm.doc.company, sales_order: frm.doc.name };
+  const defs = [
+    { label: __("Pick List"), triggers: ["make_pick_list", "make_pick_list_for_sales_order"], doctype: "Pick List", opts: common },
+    { label: __("Delivery Note"), triggers: ["make_delivery_note"], doctype: "Delivery Note", opts: common },
+    { label: __("Work Order"), triggers: ["make_work_order"], doctype: "Work Order", opts: { ...common, production_item: "" } },
+    { label: __("Sales Invoice"), triggers: ["make_sales_invoice"], doctype: "Sales Invoice", opts: common },
+    { label: __("Material Request"), triggers: ["make_material_request"], doctype: "Material Request", opts: common },
+    { label: __("Request for Raw Materials"), triggers: ["make_raw_material_request", "make_request_for_raw_materials"], doctype: "Material Request", opts: { ...common, material_request_type: "Purchase" } },
+    { label: __("Purchase Order"), triggers: ["make_purchase_order"], doctype: "Purchase Order", opts: common },
+    { label: __("Project"), triggers: ["make_project"], doctype: "Project", opts: { company: frm.doc.company, customer: frm.doc.customer } },
+    { label: __("Payment Request"), triggers: ["make_payment_request"], doctype: "Payment Request", opts: common },
+    { label: __("Payment"), triggers: ["make_payment_entry"], doctype: "Payment Entry", opts: common },
+  ];
+
+  defs.forEach((d) => {
+    frm.add_custom_button(d.label, () => callTrigger(d.triggers, d.doctype, d.opts), __("OTR Create"));
+  });
+}
+
+function ensure_update_items_button(frm) {
+  if (!frm || frm.doc.docstatus !== 1 || !frm.has_perm("write")) return;
+
+  const existing = frm.custom_buttons && frm.custom_buttons[__("Update Items")];
+  if (existing) return;
+
+  // Fallback button only when default is missing.
+  frm.add_custom_button(__("Update Items"), () => {
+    if (window.erpnext && erpnext.utils && erpnext.utils.update_child_items) {
+      erpnext.utils.update_child_items({
+        frm: frm,
+        child_docname: "items",
+        child_doctype: "Sales Order Detail",
+        cannot_add_row: false,
+        has_reserved_stock: frm.doc.__onload && frm.doc.__onload.has_reserved_stock,
+      });
+    } else {
+      frappe.msgprint(__("Update Items utility is not available."));
+    }
+  });
+}
+
 frappe.ui.form.on("Sales Order", {
   refresh(frm) {
     // Keep ERPNext native Create menu visible/primary.
@@ -1964,7 +2025,10 @@ frappe.ui.form.on("Sales Order", {
       if (frm.page && frm.page.set_inner_btn_group_as_primary) {
         frm.page.set_inner_btn_group_as_primary(__("Create"));
       }
+      ensure_default_sales_order_create_menu(frm);
+      ensure_update_items_button(frm);
     }, 200);
+    setTimeout(() => ensure_update_items_button(frm), 1400);
 
     if (frm.fields_dict.custom_po_item && frm.fields_dict.custom_po_item.grid) {
       const g = frm.fields_dict.custom_po_item.grid;
@@ -2884,15 +2948,16 @@ function materialShortageTable(rows){
         <td style="text-align:right;">${_n0(prq)}</td>
         <td style="text-align:right;" class="${ppq>0?'so-warning':'so-success'}">${_n0(ppq)}</td>
         <td style="text-align:right;">${_money0(lprGroup)}</td>
-        <td>
-          ${suggested > 0 ? `<button class="btn btn-xs btn-primary" data-ms-create-po-group="1" data-group="${esc(g)}">${__("Create PO")}</button>` : `<span class="text-muted">-</span>`}
-        </td>
+        <td><button class="btn btn-xs btn-primary" data-ms-create-po-group="1" data-group="${esc(g)}">${__("Create PO")}</button></td>
       </tr>
     `;
 
     list.forEach((r) => {
-      const shortageQty = Number(r.shortage_qty || 0);
-      const suggestedQty = shortageQty + Number(r.wastage_qty || 0);
+      let shortageQty = Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0);
+      if (shortageQty <= 0) shortageQty = Number(r.pending_po_qty || 0);
+      if (shortageQty <= 0) shortageQty = Number(r.required_qty || 0);
+      if (shortageQty <= 0) shortageQty = Number(r.po_qty || 0);
+      if (shortageQty <= 0) shortageQty = 1;
       body += `
         <tr data-panel="${esc(key)}" style="display:none;">
           <td style="padding-left:26px;width:13%;min-width:140px;">${esc(r.item_code || "")}</td>
@@ -2908,7 +2973,7 @@ function materialShortageTable(rows){
           <td style="text-align:right;" class="${Number(r.pending_po_qty||0)>0?'so-warning':'so-success'}">${_n0(r.pending_po_qty)}</td>
           <td style="text-align:right;">${_money0(r.last_purchase_rate || 0)}</td>
           <td>
-            ${suggestedQty > 0 ? `<button class="btn btn-xs btn-primary" data-ms-create-po="1" data-item="${esc(r.item_code || "")}" data-qty="${esc(shortageQty)}" data-description="${esc(r.item_code || "")}" data-wp="${esc(r.wastage_pct || 0)}" data-wq="${esc(r.wastage_qty || 0)}">${__("Create PO")}</button>` : `<span class="text-muted">-</span>`}
+            <button class="btn btn-xs btn-primary" data-ms-create-po="1" data-item="${esc(r.item_code || "")}" data-qty="${esc(shortageQty)}" data-description="${esc(r.item_code || "")}" data-wp="${esc(r.wastage_pct || 0)}" data-wq="${esc(r.wastage_qty || 0)}">${__("Create PO")}</button>
           </td>
         </tr>
       `;
@@ -3019,12 +3084,17 @@ function _allDoneStatus(statuses){
   return arr.every((s) => s.includes("complete") || s.includes("closed"));
 }
 
+function _docStatusCell(doctype, names, statuses) {
+  const list = (names || []).filter(Boolean);
+  if (!list.length) return _statusChip(false, false);
+  const links = list.map((n) => docLink(doctype, n)).join("<br>");
+  const done = _allDoneStatus(statuses || []);
+  return `${links}<div style="margin-top:4px;">${_statusChip(true, done)}</div>`;
+}
+
 function salesOrderItemsPlanningTable(data){
   const rows = _planningRows(data);
   const body = rows.length ? rows.map((r) => {
-    const ppDone = _allDoneStatus(r.pp_statuses);
-    const woDone = _allDoneStatus(r.wo_statuses);
-    const jcDone = _allDoneStatus(r.jc_statuses);
     return `
       <tr>
         <td style="text-align:center;">${r.idx}</td>
@@ -3032,9 +3102,9 @@ function salesOrderItemsPlanningTable(data){
         <td style="text-align:right;">${_n0(r.ordered_qty)}</td>
         <td style="text-align:right;">${_n0(r.delivered_qty)}</td>
         <td style="text-align:right;">${_n0(r.pending_qty)}</td>
-        <td>${_statusChip(r.pp_list.length > 0, ppDone)}</td>
-        <td>${_statusChip(r.wo_list.length > 0, woDone)}</td>
-        <td>${_statusChip(r.jc_list.length > 0, jcDone)}</td>
+        <td>${_docStatusCell("Production Plan", r.pp_list, r.pp_statuses)}</td>
+        <td>${_docStatusCell("Work Order", r.wo_list, r.wo_statuses)}</td>
+        <td>${_docStatusCell("Job Card", r.jc_list, r.jc_statuses)}</td>
         <td style="white-space:nowrap;">
           <button class="btn btn-xs btn-info" data-plan-action="pp" data-item="${esc(r.item_code)}">PP</button>
           <button class="btn btn-xs btn-dark" data-plan-action="wo" data-item="${esc(r.item_code)}">WO</button>
@@ -3112,70 +3182,493 @@ function manufacturingControlCenter(frm, data){
 }
 
 function bindDashboardActionButtons($wrap, frm){
-  const openActionCenterForItem = (item) => {
-    const d = new frappe.ui.Dialog({
-      title: __("Action Center"),
-      size: "large",
-      fields: [{ fieldtype: "HTML", fieldname: "body" }],
-    });
-    d.fields_dict.body.$wrapper.html(`
-      <div style="margin-bottom:10px;padding:8px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;">
-        <b>${__("Sales Order")}:</b> ${esc(frm.doc.name)} &nbsp; | &nbsp; <b>${__("Item")}:</b> ${esc(item || "-")}
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;">
-        <button class="btn btn-sm btn-info" data-ac="pp">${__("Create Production Plan")}</button>
-        <button class="btn btn-sm btn-dark" data-ac="wo">${__("Create Work Order")}</button>
-        <button class="btn btn-sm btn-warning" data-ac="mt">${__("Material Transfer")}</button>
-        <button class="btn btn-sm btn-primary" data-ac="mfg">${__("Manufacture Entry")}</button>
-        <button class="btn btn-sm btn-success" data-ac="dn">${__("Create Delivery Note")}</button>
-        <button class="btn btn-sm btn-secondary" data-ac="jc">${__("Open Job Cards")}</button>
-      </div>
-    `);
-    const $w = d.fields_dict.body.$wrapper;
-    $w.find("[data-ac]").on("click", function(e){
-      e.preventDefault();
-      const a = $(this).attr("data-ac");
-      if (a === "pp") {
-        frappe.route_options = { get_items_from: "Sales Order", sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
-        frappe.new_doc("Production Plan");
-      } else if (a === "wo") {
-        frappe.route_options = { sales_order: frm.doc.name, production_item: item, company: frm.doc.company };
-        frappe.new_doc("Work Order");
-      } else if (a === "mt") {
-        frappe.route_options = { stock_entry_type: "Material Transfer for Manufacture", sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
-        frappe.new_doc("Stock Entry");
-      } else if (a === "mfg") {
-        frappe.route_options = { stock_entry_type: "Manufacture", sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
-        frappe.new_doc("Stock Entry");
-      } else if (a === "dn") {
-        frappe.route_options = { against_sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
-        frappe.new_doc("Delivery Note");
-      } else if (a === "jc") {
-        frappe.set_route("List", "Job Card", { sales_order: frm.doc.name });
+  const primaryItem = (() => {
+    const rows = frm.doc.items || [];
+    if (!rows.length) return "";
+    return (rows[0].item_code || rows[0].item_name || "").trim();
+  })();
+
+  const getPendingSoItems = async () => {
+    const rows = (frm.doc.items || []).map((r) => {
+      const pending = Number(r.qty || 0) - Number(r.delivered_qty || 0);
+      return {
+        item_code: r.item_code || "",
+        item_name: r.item_name || r.item_code || "",
+        qty: pending > 0 ? pending : Number(r.qty || 0) || 1,
+        stock_uom: r.uom || r.stock_uom || "",
+        sales_order_item: r.name || "",
+      };
+    }).filter((r) => r.item_code);
+    const withBom = await Promise.all(rows.map(async (r) => {
+      let bom = "";
+      try {
+        const x = await frappe.db.get_value("Item", r.item_code, "default_bom");
+        bom = (x && x.message && x.message.default_bom) || "";
+      } catch (e) {
+        bom = "";
       }
-      d.hide();
+      return { ...r, bom_no: bom };
+    }));
+    return withBom;
+  };
+
+  const insertDoc = async (doc) => {
+    const r = await frappe.call({
+      method: "frappe.client.insert",
+      args: { doc },
+      freeze: true,
+      freeze_message: __("Creating draft..."),
+    });
+    return (r && r.message) || null;
+  };
+
+  const submitDoc = async (doc) => {
+    const r = await frappe.call({
+      method: "frappe.client.submit",
+      args: { doc },
+      freeze: true,
+      freeze_message: __("Submitting..."),
+    });
+    return (r && r.message) || doc;
+  };
+
+  const openSalesOrderCreator = (seed) => {
+    const d = new frappe.ui.Dialog({
+      title: __("Create Sales Order"),
+      size: "large",
+      fields: [
+        { fieldtype: "Section Break" },
+        { fieldtype: "Link", fieldname: "company", label: __("Company"), options: "Company", default: seed.company || frm.doc.company || "", reqd: 1 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Link", fieldname: "customer", label: __("Customer"), options: "Customer", default: frm.doc.customer || "", reqd: 1 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Date", fieldname: "delivery_date", label: __("Delivery Date"), default: frappe.datetime.now_date(), reqd: 1 },
+        { fieldtype: "Section Break" },
+        { fieldtype: "Link", fieldname: "item_code", label: __("Item"), options: "Item", default: seed.item_code || primaryItem || "", reqd: 1 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Float", fieldname: "qty", label: __("Qty"), default: 1, reqd: 1 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Currency", fieldname: "rate", label: __("Rate"), default: 0 },
+      ],
+      primary_action_label: __("Create Draft Sales Order"),
+      primary_action: async (v) => {
+        const doc = {
+          doctype: "Sales Order",
+          company: v.company,
+          customer: v.customer,
+          delivery_date: v.delivery_date,
+          items: [{
+            doctype: "Sales Order Item",
+            item_code: v.item_code,
+            qty: Number(v.qty || 0),
+            delivery_date: v.delivery_date,
+            rate: Number(v.rate || 0),
+          }],
+        };
+        try {
+          const created = await insertDoc(doc);
+          d.hide();
+          frappe.show_alert({ message: __("Draft Sales Order {0} created", [created.name]), indicator: "green" }, 5);
+          if (created && created.name) window.open(`/app/sales-order/${encodeURIComponent(created.name)}`, "_blank");
+        } catch (e) {
+          frappe.msgprint(__("Failed: {0}", [e.message || e]));
+        }
+      },
     });
     d.show();
   };
 
-  const openNew = (doctype, routeOptions) => {
-    frappe.route_options = routeOptions || {};
-    frappe.new_doc(doctype);
+  const openProductionPlanCreator = (seed) => {
+    const rows = [];
+    const d = new frappe.ui.Dialog({
+      title: __("Create Production Plan"),
+      size: "extra-large",
+      fields: [
+        { fieldtype: "HTML", fieldname: "help_html" },
+        { fieldtype: "Section Break" },
+        { fieldtype: "Link", fieldname: "company", label: __("Company"), options: "Company", default: seed.company || frm.doc.company || "", reqd: 1 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Link", fieldname: "sales_order", label: __("Sales Order"), options: "Sales Order", default: frm.doc.name || "", reqd: 1 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Date", fieldname: "posting_date", label: __("Posting Date"), default: frappe.datetime.now_date(), reqd: 1 },
+        { fieldtype: "Section Break" },
+        { fieldtype: "Datetime", fieldname: "planned_start_date", label: __("Default Planned Start"), default: frappe.datetime.now_datetime(), reqd: 1 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Link", fieldname: "default_fg_warehouse", label: __("Default FG Warehouse"), options: "Warehouse", default: frm.doc.set_warehouse || "" },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Button", fieldname: "load_sales_order_items", label: __("Load Sales Order Items") },
+        { fieldtype: "Section Break" },
+        { fieldtype: "Check", fieldname: "submit_after_create", label: __("Submit after create"), default: 0 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Check", fieldname: "create_work_orders_after_submit", label: __("Create Work Orders after submit"), default: 0 },
+        { fieldtype: "Section Break" },
+        {
+          fieldtype: "Table",
+          fieldname: "po_items",
+          label: __("Production Items"),
+          cannot_add_rows: false,
+          in_place_edit: true,
+          data: rows,
+          get_data: () => rows,
+          fields: [
+            { fieldtype: "Link", fieldname: "item_code", label: __("Item"), options: "Item", reqd: 1, in_list_view: 1 },
+            { fieldtype: "Link", fieldname: "bom_no", label: __("BOM"), options: "BOM", reqd: 1, in_list_view: 1 },
+            { fieldtype: "Float", fieldname: "planned_qty", label: __("Planned Qty"), reqd: 1, in_list_view: 1 },
+            { fieldtype: "Link", fieldname: "stock_uom", label: __("UOM"), options: "UOM", in_list_view: 1 },
+            { fieldtype: "Datetime", fieldname: "planned_start_date", label: __("Planned Start"), in_list_view: 1 },
+            { fieldtype: "Link", fieldname: "warehouse", label: __("FG Warehouse"), options: "Warehouse", in_list_view: 1 },
+            { fieldtype: "Data", fieldname: "sales_order_item", label: __("SO Item"), hidden: 1 },
+          ],
+        },
+      ],
+      primary_action_label: __("Create Draft Production Plan"),
+      primary_action: async (v) => {
+        const poItems = (v.po_items || []).filter((r) => r.item_code && r.bom_no && Number(r.planned_qty || 0) > 0);
+        if (!poItems.length) return frappe.msgprint(__("Add at least one valid item row."));
+        let doc = {
+          doctype: "Production Plan",
+          company: v.company,
+          posting_date: v.posting_date,
+          get_items_from: "Sales Order",
+          sales_orders: [{ doctype: "Production Plan Sales Order", sales_order: v.sales_order }],
+          po_items: poItems.map((r) => ({
+            doctype: "Production Plan Item",
+            item_code: r.item_code,
+            bom_no: r.bom_no,
+            stock_uom: r.stock_uom || "",
+            planned_qty: Number(r.planned_qty || 0),
+            pending_qty: Number(r.planned_qty || 0),
+            planned_start_date: r.planned_start_date || v.planned_start_date,
+            warehouse: r.warehouse || v.default_fg_warehouse || "",
+            sales_order: v.sales_order || "",
+            sales_order_item: r.sales_order_item || "",
+          })),
+        };
+        try {
+          doc = await insertDoc(doc);
+          if (v.submit_after_create || v.create_work_orders_after_submit) doc = await submitDoc(doc);
+          if (v.create_work_orders_after_submit && doc && doc.name) {
+            await frappe.call({
+              method: "frappe.handler.run_doc_method",
+              args: { dt: "Production Plan", dn: doc.name, method: "make_work_order" },
+              freeze: true,
+              freeze_message: __("Creating Work Orders from Production Plan..."),
+            });
+          }
+          d.hide();
+          frappe.show_alert({ message: __("Production Plan {0} created", [doc.name]), indicator: "green" }, 6);
+          if (doc && doc.name) window.open(`/app/production-plan/${encodeURIComponent(doc.name)}`, "_blank");
+        } catch (e) {
+          frappe.msgprint(__("Failed: {0}", [e.message || e]));
+        }
+      },
+    });
+    d.fields_dict.help_html.$wrapper.html(`
+      <div style="padding:10px;border:1px solid #dbeafe;border-radius:8px;background:#eff6ff;color:#1d4ed8;font-size:12px;">
+        ${__("Required for Production Plan: Company, Posting Date, and item rows with Item, BOM, Planned Qty, UOM, and Planned Start.")}
+      </div>
+    `);
+    d.fields_dict.load_sales_order_items.$input.on("click", async () => {
+      rows.splice(0, rows.length);
+      const soRows = await getPendingSoItems();
+      soRows.forEach((r) => rows.push({
+        item_code: r.item_code,
+        bom_no: r.bom_no || "",
+        planned_qty: Number(r.qty || 1),
+        stock_uom: r.stock_uom || "",
+        planned_start_date: d.get_value("planned_start_date") || frappe.datetime.now_datetime(),
+        warehouse: d.get_value("default_fg_warehouse") || "",
+        sales_order_item: r.sales_order_item || "",
+      }));
+      d.fields_dict.po_items.grid.refresh();
+    });
+    d.show();
+    d.fields_dict.load_sales_order_items.$input.trigger("click");
+  };
+
+  const openWorkOrderCreator = (seed) => {
+    const rows = [];
+    const d = new frappe.ui.Dialog({
+      title: __("Create Work Order"),
+      size: "extra-large",
+      fields: [
+        { fieldtype: "HTML", fieldname: "help_html" },
+        { fieldtype: "Section Break" },
+        { fieldtype: "Link", fieldname: "company", label: __("Company"), options: "Company", default: seed.company || frm.doc.company || "", reqd: 1 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Link", fieldname: "sales_order", label: __("Sales Order"), options: "Sales Order", default: frm.doc.name || "", reqd: 1 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Button", fieldname: "load_sales_order_items", label: __("Load Sales Order Items") },
+        { fieldtype: "Section Break" },
+        { fieldtype: "Datetime", fieldname: "planned_start_date", label: __("Planned Start Date"), default: frappe.datetime.now_datetime(), reqd: 1 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Link", fieldname: "source_warehouse", label: __("Source Warehouse"), options: "Warehouse", default: frm.doc.set_warehouse || "" },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Link", fieldname: "wip_warehouse", label: __("WIP Warehouse"), options: "Warehouse" },
+        { fieldtype: "Section Break" },
+        { fieldtype: "Link", fieldname: "fg_warehouse", label: __("Target Warehouse"), options: "Warehouse", default: frm.doc.set_warehouse || "", reqd: 1 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Link", fieldname: "scrap_warehouse", label: __("Scrap Warehouse"), options: "Warehouse" },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Check", fieldname: "skip_transfer", label: __("Skip Material Transfer to WIP"), default: 0 },
+        { fieldtype: "Section Break" },
+        { fieldtype: "Check", fieldname: "submit_after_create", label: __("Submit after create"), default: 0 },
+        { fieldtype: "Section Break" },
+        {
+          fieldtype: "Table",
+          fieldname: "wo_items",
+          label: __("Work Order Items"),
+          cannot_add_rows: false,
+          in_place_edit: true,
+          data: rows,
+          get_data: () => rows,
+          fields: [
+            { fieldtype: "Link", fieldname: "item_code", label: __("Item"), options: "Item", reqd: 1, in_list_view: 1 },
+            { fieldtype: "Link", fieldname: "bom_no", label: __("BOM"), options: "BOM", reqd: 1, in_list_view: 1 },
+            { fieldtype: "Float", fieldname: "qty", label: __("Qty"), reqd: 1, in_list_view: 1 },
+            { fieldtype: "Data", fieldname: "sales_order_item", label: __("SO Item"), hidden: 1 },
+          ],
+        },
+      ],
+      primary_action_label: __("Create Draft Work Order(s)"),
+      primary_action: async (v) => {
+        const woRows = (v.wo_items || []).filter((r) => r.item_code && r.bom_no && Number(r.qty || 0) > 0);
+        if (!woRows.length) return frappe.msgprint(__("Add at least one valid Work Order row."));
+        try {
+          const created = [];
+          for (const r of woRows) {
+            let doc = await insertDoc({
+              doctype: "Work Order",
+              company: v.company,
+              sales_order: v.sales_order,
+              sales_order_item: r.sales_order_item || "",
+              production_item: r.item_code,
+              bom_no: r.bom_no,
+              qty: Number(r.qty || 0),
+              planned_start_date: v.planned_start_date,
+              source_warehouse: v.source_warehouse || "",
+              wip_warehouse: v.wip_warehouse || "",
+              fg_warehouse: v.fg_warehouse || "",
+              scrap_warehouse: v.scrap_warehouse || "",
+              skip_transfer: v.skip_transfer ? 1 : 0,
+            });
+            if (v.submit_after_create) doc = await submitDoc(doc);
+            if (doc && doc.name) created.push(doc.name);
+          }
+          d.hide();
+          frappe.show_alert({ message: __("{0} Work Order(s) created", [created.length]), indicator: "green" }, 6);
+          if (created[0]) window.open(`/app/work-order/${encodeURIComponent(created[0])}`, "_blank");
+        } catch (e) {
+          frappe.msgprint(__("Failed: {0}", [e.message || e]));
+        }
+      },
+    });
+    d.fields_dict.help_html.$wrapper.html(`
+      <div style="padding:10px;border:1px solid #ede9fe;border-radius:8px;background:#f5f3ff;color:#5b21b6;font-size:12px;">
+        ${__("Required for Work Order: Company, Planned Start Date, Target Warehouse, and item rows with Item, BOM, and Qty.")}
+      </div>
+    `);
+    d.fields_dict.load_sales_order_items.$input.on("click", async () => {
+      rows.splice(0, rows.length);
+      const soRows = await getPendingSoItems();
+      soRows.forEach((r) => rows.push({
+        item_code: r.item_code,
+        bom_no: r.bom_no || "",
+        qty: Number(r.qty || 1),
+        sales_order_item: r.sales_order_item || "",
+      }));
+      d.fields_dict.wo_items.grid.refresh();
+    });
+    d.show();
+    d.fields_dict.load_sales_order_items.$input.trigger("click");
+  };
+
+  const openStockEntryCreator = async (seed, purpose) => {
+    const d = new frappe.ui.Dialog({
+      title: __(purpose === "Disassemble" ? "Return / Disassemble" : purpose),
+      size: "large",
+      fields: [
+        { fieldtype: "Section Break" },
+        { fieldtype: "Link", fieldname: "work_order", label: __("Work Order"), options: "Work Order", default: seed.work_order || "", reqd: 1 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Float", fieldname: "qty", label: __("Qty"), default: 1, reqd: 1 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Date", fieldname: "posting_date", label: __("Posting Date"), default: frappe.datetime.now_date(), reqd: 1 },
+        { fieldtype: "Section Break" },
+        { fieldtype: "Link", fieldname: "source_warehouse", label: __("Source Warehouse"), options: "Warehouse", default: frm.doc.set_warehouse || "" },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Link", fieldname: "target_warehouse", label: __("Target Warehouse"), options: "Warehouse", default: frm.doc.set_warehouse || "" },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Check", fieldname: "submit_after_create", label: __("Submit after create"), default: 0 },
+      ],
+      primary_action_label: __("Create Draft Entry"),
+      primary_action: async (v) => {
+        try {
+          const mapped = await frappe.call({
+            method: "erpnext.manufacturing.doctype.work_order.work_order.make_stock_entry",
+            args: {
+              work_order_id: v.work_order,
+              purpose,
+              qty: Number(v.qty || 0),
+              target_warehouse: v.target_warehouse || "",
+            },
+            freeze: true,
+            freeze_message: __("Preparing entry..."),
+          });
+          let doc = (mapped && mapped.message) || null;
+          if (!doc) throw new Error(__("Could not prepare stock entry"));
+          doc.posting_date = v.posting_date || doc.posting_date;
+          if (v.source_warehouse && Array.isArray(doc.items)) {
+            doc.items = doc.items.map((x) => ({ ...x, s_warehouse: x.s_warehouse || v.source_warehouse }));
+          }
+          if (v.target_warehouse && Array.isArray(doc.items)) {
+            doc.items = doc.items.map((x) => ({ ...x, t_warehouse: x.t_warehouse || v.target_warehouse }));
+          }
+          doc = await insertDoc(doc);
+          if (v.submit_after_create) doc = await submitDoc(doc);
+          d.hide();
+          frappe.show_alert({ message: __("Stock Entry {0} created", [doc.name]), indicator: "green" }, 6);
+          if (doc && doc.name) window.open(`/app/stock-entry/${encodeURIComponent(doc.name)}`, "_blank");
+        } catch (e) {
+          frappe.msgprint(__("Failed: {0}", [e.message || e]));
+        }
+      },
+    });
+    d.show();
+  };
+
+  const openDeliveryNoteCreator = async (seed) => {
+    const d = new frappe.ui.Dialog({
+      title: __("Create Delivery Note"),
+      size: "large",
+      fields: [
+        { fieldtype: "Section Break" },
+        { fieldtype: "Link", fieldname: "sales_order", label: __("Sales Order"), options: "Sales Order", default: frm.doc.name || "", reqd: 1 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Date", fieldname: "posting_date", label: __("Posting Date"), default: frappe.datetime.now_date(), reqd: 1 },
+        { fieldtype: "Column Break" },
+        { fieldtype: "Check", fieldname: "submit_after_create", label: __("Submit after create"), default: 0 },
+      ],
+      primary_action_label: __("Create Draft Delivery Note"),
+      primary_action: async (v) => {
+        try {
+          const mapped = await frappe.call({
+            method: "erpnext.selling.doctype.sales_order.sales_order.make_delivery_note",
+            args: { source_name: v.sales_order },
+            freeze: true,
+            freeze_message: __("Preparing Delivery Note..."),
+          });
+          let doc = (mapped && mapped.message) || null;
+          if (!doc) throw new Error(__("Could not prepare delivery note"));
+          doc.posting_date = v.posting_date || doc.posting_date;
+          doc = await insertDoc(doc);
+          if (v.submit_after_create) doc = await submitDoc(doc);
+          d.hide();
+          frappe.show_alert({ message: __("Delivery Note {0} created", [doc.name]), indicator: "green" }, 6);
+          if (doc && doc.name) window.open(`/app/delivery-note/${encodeURIComponent(doc.name)}`, "_blank");
+        } catch (e) {
+          frappe.msgprint(__("Failed: {0}", [e.message || e]));
+        }
+      },
+    });
+    d.show();
+  };
+
+  const openExistingDocsDialog = (seed) => {
+    const d = new frappe.ui.Dialog({
+      title: __("Manage Existing Docs"),
+      fields: [{ fieldtype: "HTML", fieldname: "body" }],
+    });
+    d.fields_dict.body.$wrapper.html(`
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+        <button class="btn btn-default" data-open="so">${__("Open Sales Order")}</button>
+        <button class="btn btn-default" data-open="wo">${__("Open Work Orders")}</button>
+        <button class="btn btn-default" data-open="pp">${__("Open Production Plans")}</button>
+        <button class="btn btn-default" data-open="jc">${__("Open Job Cards")}</button>
+      </div>
+    `);
+    const $b = d.fields_dict.body.$wrapper;
+    $b.find("[data-open='so']").on("click", () => { d.hide(); frappe.set_route("Form", "Sales Order", frm.doc.name); });
+    $b.find("[data-open='wo']").on("click", () => { d.hide(); frappe.set_route("List", "Work Order", { sales_order: frm.doc.name }); });
+    $b.find("[data-open='pp']").on("click", () => { d.hide(); frappe.set_route("List", "Production Plan", { sales_order: frm.doc.name }); });
+    $b.find("[data-open='jc']").on("click", () => { d.hide(); frappe.set_route("List", "Job Card", { sales_order: frm.doc.name }); });
+    d.show();
+  };
+
+  const openActionCenterForItem = (item, defaultAction) => {
+    const d = new frappe.ui.Dialog({
+      title: __("Manufacturing Control Center"),
+      size: "large",
+      fields: [{ fieldtype: "HTML", fieldname: "body" }],
+    });
+    const safeItem = item || primaryItem || "";
+    d.fields_dict.body.$wrapper.html(`
+      <div style="margin-bottom:10px;padding:8px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;">
+        <b>${__("Sales Order")}:</b> ${esc(frm.doc.name)} &nbsp; | &nbsp; <b>${__("Item")}:</b> ${esc(safeItem || __("Multiple"))}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;">
+        <button class="btn btn-sm btn-success" data-ac="so">${__("Create Sales Order")}</button>
+        <button class="btn btn-sm btn-info" data-ac="pp">${__("Create Production Plan")}</button>
+        <button class="btn btn-sm btn-dark" data-ac="wo">${__("Create Work Order")}</button>
+        <button class="btn btn-sm btn-secondary" data-ac="manage">${__("Manage Existing Docs")}</button>
+        <button class="btn btn-sm btn-warning" data-ac="mt">${__("Material Transfer")}</button>
+        <button class="btn btn-sm btn-primary" data-ac="mfg">${__("Manufacture Entry")}</button>
+        <button class="btn btn-sm btn-success" data-ac="dn">${__("Create Delivery Note")}</button>
+        <button class="btn btn-sm btn-secondary" data-ac="ret">${__("Return / Disassemble")}</button>
+        <button class="btn btn-sm btn-secondary" data-ac="jc">${__("Open Job Cards")}</button>
+      </div>
+    `);
+    const $w = d.fields_dict.body.$wrapper;
+    const runAction = (a) => {
+      const selectedItem = safeItem;
+      const seed = {
+        company: frm.doc.company || "",
+        sales_order: frm.doc.name || "",
+        customer: frm.doc.customer || "",
+        item_code: selectedItem || "",
+        work_order: "",
+      };
+      if (a === "so") openSalesOrderCreator(seed);
+      else if (a === "pp") openProductionPlanCreator(seed);
+      else if (a === "wo") openWorkOrderCreator(seed);
+      else if (a === "manage") openExistingDocsDialog(seed);
+      else if (a === "mt") openStockEntryCreator(seed, "Material Transfer for Manufacture");
+      else if (a === "mfg") openStockEntryCreator(seed, "Manufacture");
+      else if (a === "dn") openDeliveryNoteCreator(seed);
+      else if (a === "ret") openStockEntryCreator(seed, "Disassemble");
+      else if (a === "jc") frappe.set_route("List", "Job Card", { sales_order: frm.doc.name });
+      d.hide();
+    };
+
+    $w.find("[data-ac]").on("click", function(e){
+      e.preventDefault();
+      runAction($(this).attr("data-ac"));
+    });
+    d.show();
+
+    if (defaultAction) {
+      const $btn = $w.find(`[data-ac='${defaultAction}']`);
+      if ($btn && $btn.length) {
+        $btn.addClass("btn-primary");
+      }
+    }
   };
 
   $wrap.find("[data-so-action]").off("click").on("click", function(e){
     e.preventDefault();
     e.stopPropagation();
     const action = $(this).attr("data-so-action");
-    const common = { sales_order: frm.doc.name, company: frm.doc.company };
-    if (action === "create_sales_order") openNew("Sales Order", { company: frm.doc.company });
-    else if (action === "create_production_plan") openNew("Production Plan", { get_items_from: "Sales Order", sales_order: frm.doc.name, company: frm.doc.company });
-    else if (action === "create_work_order") openNew("Work Order", { sales_order: frm.doc.name, company: frm.doc.company });
-    else if (action === "create_material_transfer") openNew("Stock Entry", { stock_entry_type: "Material Transfer for Manufacture", ...common });
-    else if (action === "create_manufacture_entry") openNew("Stock Entry", { stock_entry_type: "Manufacture", ...common });
-    else if (action === "create_delivery_note") openNew("Delivery Note", { against_sales_order: frm.doc.name, ...common });
-    else if (action === "return_disassemble") openNew("Stock Entry", { stock_entry_type: "Material Transfer", purpose: "Material Transfer", ...common });
-    else if (action === "manage_docs") frappe.set_route("query-report", "Purchase Order updated Status");
+    const map = {
+      create_sales_order: "so",
+      create_production_plan: "pp",
+      create_work_order: "wo",
+      create_material_transfer: "mt",
+      create_manufacture_entry: "mfg",
+      create_delivery_note: "dn",
+      return_disassemble: "ret",
+      manage_docs: "manage",
+    };
+    openActionCenterForItem(primaryItem, map[action] || "");
   });
 
   $wrap.find("[data-plan-action]").off("click").on("click", function(e){
@@ -3183,24 +3676,8 @@ function bindDashboardActionButtons($wrap, frm){
     e.stopPropagation();
     const action = $(this).attr("data-plan-action");
     const item = ($(this).attr("data-item") || "").trim();
-    if (action === "pp") {
-      frappe.route_options = { get_items_from: "Sales Order", sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
-      frappe.new_doc("Production Plan");
-    } else if (action === "wo") {
-      frappe.route_options = { sales_order: frm.doc.name, production_item: item, company: frm.doc.company };
-      frappe.new_doc("Work Order");
-    } else if (action === "mt") {
-      frappe.route_options = { stock_entry_type: "Material Transfer for Manufacture", sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
-      frappe.new_doc("Stock Entry");
-    } else if (action === "mfg") {
-      frappe.route_options = { stock_entry_type: "Manufacture", sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
-      frappe.new_doc("Stock Entry");
-    } else if (action === "dn") {
-      frappe.route_options = { against_sales_order: frm.doc.name, item_code: item, company: frm.doc.company };
-      frappe.new_doc("Delivery Note");
-    } else if (action === "view") {
-      openActionCenterForItem(item);
-    }
+    const map = { pp: "pp", wo: "wo", mt: "mt", mfg: "mfg", dn: "dn", view: "" };
+    openActionCenterForItem(item, map[action] || "");
   });
 }
 
@@ -3234,17 +3711,32 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
     }
     const d = itemDefaults[item] || {};
     const ml = (data.material_shortage || []).find((r) => String(r.item_code || "").trim() === item) || {};
+    const supplier = d.supplier || ml.last_supplier || ml.supplier || "";
+    const warehouse = d.warehouse || frm.doc.set_warehouse || "";
+    const rate = Number(d.rate || ml.last_purchase_rate || 0);
+    const wpFinal = Number(wp || d.custom_wastage_percentage || ml.wastage_pct || 0);
+    const wqFinal = Number(wq || d.custom_wastage_qty || ((defaultQty * wpFinal) / 100));
+    const extraFinal = Number(d.extra_qty || 0);
+    const poQty = Number(defaultQty + wqFinal + extraFinal);
+
     open_po_item_data_entry(frm, {
-      item_code: item,
-      qty: defaultQty,
-      descriptions: description || item,
+      supplier,
+      warehouse,
       select_for_po: 1,
-      supplier: d.supplier || ml.last_supplier || "",
-      warehouse: d.warehouse || "",
-      rate: Number(d.rate || ml.last_purchase_rate || 0),
-      custom_wastage_percentage: wp || Number(d.custom_wastage_percentage || 0),
-      custom_wastage_qty: wq || Number(d.custom_wastage_qty || 0),
-      extra_qty: Number(d.extra_qty || 0),
+      rows: [{
+        item_code: item,
+        qty: defaultQty,
+        base_qty: defaultQty,
+        descriptions: description || item,
+        supplier,
+        warehouse,
+        rate,
+        custom_wastage_percentage: wpFinal,
+        custom_wastage_qty: wqFinal,
+        extra_qty: extraFinal,
+        po_qty: poQty,
+        select_for_po: 1,
+      }],
     });
   });
 
@@ -3253,11 +3745,7 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
     e.stopPropagation();
     const group = ($(this).attr("data-group") || "").trim();
     if (!group) return;
-    const rows = (data.material_shortage || []).filter((r) => {
-      if ((r.item_group || "") !== group) return false;
-      const suggested = Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0);
-      return suggested > 0;
-    });
+    const rows = (data.material_shortage || []).filter((r) => (r.item_group || "") === group && (r.item_code || "").trim());
     if (!rows.length) {
       frappe.msgprint(__("No shortage rows found for this Item Group."));
       return;
@@ -3265,16 +3753,30 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
     const prefillRows = rows.map((r) => ({
       ...(itemDefaults[r.item_code || ""] || {}),
       item_code: r.item_code || "",
-      qty: Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0),
+      qty: (function(){
+        let q = Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0);
+        if (q <= 0) q = Number(r.pending_po_qty || 0);
+        if (q <= 0) q = Number(r.required_qty || 0);
+        if (q <= 0) q = Number(r.po_qty || 0);
+        if (q <= 0) q = 1;
+        return q;
+      })(),
       base_qty: Number(r.required_qty || 0),
       custom_wastage_percentage: Number(r.wastage_pct || 0),
       custom_wastage_qty: Number(r.wastage_qty || 0),
-      po_qty: Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0),
+      po_qty: (function(){
+        let q = Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0);
+        if (q <= 0) q = Number(r.pending_po_qty || 0);
+        if (q <= 0) q = Number(r.required_qty || 0);
+        if (q <= 0) q = Number(r.po_qty || 0);
+        if (q <= 0) q = 1;
+        return q;
+      })(),
       rate: Number(r.last_purchase_rate || 0),
       supplier: (itemDefaults[r.item_code || ""] || {}).supplier || r.last_supplier || "",
       descriptions: r.item_code || "",
       select_for_po: 1,
-    })).filter((r) => r.item_code && (Number(r.qty || 0) > 0 || Number(r.po_qty || 0) > 0));
+    })).filter((r) => r.item_code);
 
     if (!prefillRows.length) {
       frappe.msgprint(__("No valid rows found for Create PO."));
@@ -3417,6 +3919,14 @@ frappe.ui.form.on("Sales Order", {
     ) {
       fill_bank_fields(frm, frm.doc.custom_bank_account);
     }
+    setTimeout(() => {
+      if (frm.page && frm.page.set_inner_btn_group_as_primary) {
+        frm.page.set_inner_btn_group_as_primary(__("Create"));
+      }
+      ensure_default_sales_order_create_menu(frm);
+      ensure_update_items_button(frm);
+    }, 200);
+    setTimeout(() => ensure_update_items_button(frm), 1400);
   },
 });
 
