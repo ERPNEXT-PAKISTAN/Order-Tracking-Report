@@ -262,9 +262,16 @@ def ensure_wastage_doctype():
             "editable_grid": 1,
             "engine": "InnoDB",
             "fields": [
-                {"fieldname": "item", "label": "Item", "fieldtype": "Link", "options": "Item"},
-                {"fieldname": "qty", "label": "Qty", "fieldtype": "Float"},
-                {"fieldname": "remarks", "label": "Remarks", "fieldtype": "Data"},
+                {
+                    "fieldname": "item",
+                    "label": "Item",
+                    "fieldtype": "Link",
+                    "options": "Item",
+                    "in_list_view": 1,
+                    "columns": 2,
+                },
+                {"fieldname": "qty", "label": "Qty", "fieldtype": "Float", "columns": 1},
+                {"fieldname": "remarks", "label": "Remarks", "fieldtype": "Data", "columns": 2},
             ],
             "permissions": [],
         }
@@ -308,11 +315,14 @@ def ensure_wastage_doctype_fields():
 
     # Normalize previously-created field definitions (older versions had Data/Check types).
     normalize = {
-        "item_group": {"fieldtype": "Link", "options": "Item Group"},
-        "wastage": {"fieldtype": "Float"},
-        "manual": {"fieldtype": "Float"},
-        "po": {"fieldtype": "Float"},
-        "source": {"fieldtype": "Select", "options": "\nWastage\nManual\nPO"},
+        "item": {"fieldtype": "Link", "options": "Item", "in_list_view": 1, "columns": 2},
+        "qty": {"fieldtype": "Float", "columns": 1},
+        "remarks": {"fieldtype": "Data", "columns": 2},
+        "item_group": {"fieldtype": "Link", "options": "Item Group", "in_list_view": 1, "columns": 2},
+        "wastage": {"fieldtype": "Float", "in_list_view": 1, "columns": 1},
+        "manual": {"fieldtype": "Float", "in_list_view": 1, "columns": 1},
+        "po": {"fieldtype": "Float", "in_list_view": 1, "columns": 1},
+        "source": {"fieldtype": "Select", "options": "\nWastage\nManual\nPO", "in_list_view": 1, "columns": 1},
     }
     for fn, cfg in normalize.items():
         df_name = frappe.db.get_value("DocField", {"parent": "Wastage", "fieldname": fn}, "name")
