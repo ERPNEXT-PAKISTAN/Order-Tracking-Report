@@ -1,0 +1,67 @@
+{
+ "app": "order_tracking_report",
+ "charts": [],
+ "content": "[\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Sales Order Live\"\n  },\n  \"id\": \"ebcb376a48\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Live Work Order\"\n  },\n  \"id\": \"2734649906\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Manage Sales Orders\"\n  },\n  \"id\": \"f0b7d9aade\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Sales Order Status Board\"\n  },\n  \"id\": \"2ec741105d\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Finanicals\"\n  },\n  \"id\": \"26639f34b0\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Purchase Order Updated Status\"\n  },\n  \"id\": \"4ed4378996\",\n  \"type\": \"shortcut\"\n }\n]",
+ "creation": "2026-04-11 22:51:19.497558",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "hide_custom": 0,
+ "icon": "branch",
+ "idx": 0,
+ "indicator_color": "blue",
+ "is_hidden": 0,
+ "label": "Order Tracking",
+ "link_type": "DocType",
+ "links": [],
+ "modified": "2026-04-11 22:51:19.497558",
+ "modified_by": "Administrator",
+ "module": "Order Tracking Report",
+ "name": "Order Tracking",
+ "number_cards": [],
+ "owner": "Administrator",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 0.0,
+ "shortcuts": [
+  {
+   "color": "blue",
+   "label": "Sales Order Live",
+   "link_to": "sales-order-live",
+   "type": "Page"
+  },
+  {
+   "color": "green",
+   "label": "Live Work Order",
+   "link_to": "live-work-order",
+   "type": "Page"
+  },
+  {
+   "color": "cyan",
+   "label": "Manage Sales Orders",
+   "link_to": "manage-sales-orders",
+   "type": "Page"
+  },
+  {
+   "color": "orange",
+   "label": "Sales Order Status Board",
+   "link_to": "sales-order-status-board",
+   "type": "Page"
+  },
+  {
+   "color": "grey",
+   "label": "Finanicals",
+   "link_to": "finanicals",
+   "type": "Page"
+  },
+  {
+   "color": "yellow",
+   "label": "Purchase Order Updated Status",
+   "link_to": "Purchase Order updated Status",
+   "type": "Report"
+  }
+ ],
+ "title": "Order Tracking",
+ "type": "Workspace"
+}

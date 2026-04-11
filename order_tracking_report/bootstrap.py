@@ -18,9 +18,68 @@ def ensure_sales_order_live_shortcuts():
     ensure_manufacturing_sales_order_status_board_shortcut()
     remove_workspace_page_shortcut("Manufacturing", "Existing Manufacturing Documents", "existing-manufacturing-documents")
     ensure_manufacturing_manage_sales_orders_shortcut()
+    ensure_order_tracking_workspace()
+    ensure_order_tracking_workspace_shortcuts()
 
 
-def _ensure_workspace_page_shortcut(workspace_name, label, page_name, color):
+def _ensure_workspace(
+    workspace_name,
+    title=None,
+    module="Order Tracking Report",
+    icon="folder-normal",
+    public=1,
+    sequence_id=None,
+    parent_page="",
+):
+    title = title or workspace_name
+    changed = False
+
+    if not frappe.db.exists("Workspace", workspace_name):
+        workspace = frappe.get_doc(
+            {
+                "doctype": "Workspace",
+                "label": workspace_name,
+                "title": title,
+                "module": module,
+                "app": "order_tracking_report",
+                "icon": icon,
+                "indicator_color": "blue",
+                "type": "Workspace",
+                "public": public,
+                "sequence_id": sequence_id or 0,
+                "parent_page": parent_page,
+                "content": "[]",
+                "is_hidden": 0,
+            }
+        )
+        workspace.insert(ignore_permissions=True)
+        return
+
+    updates = {
+        "title": title,
+        "module": module,
+        "app": "order_tracking_report",
+        "icon": icon,
+        "type": "Workspace",
+        "is_hidden": 0,
+        "parent_page": parent_page,
+    }
+    if public is not None:
+        updates["public"] = public
+    if sequence_id is not None:
+        updates["sequence_id"] = sequence_id
+
+    current = frappe.db.get_value("Workspace", workspace_name, list(updates), as_dict=True) or {}
+    for fieldname, value in updates.items():
+        if current.get(fieldname) != value:
+            frappe.db.set_value("Workspace", workspace_name, fieldname, value, update_modified=False)
+            changed = True
+
+    if changed:
+        frappe.clear_document_cache("Workspace", workspace_name)
+
+
+def _ensure_workspace_shortcut(workspace_name, label, shortcut_type, link_to, color):
     if not frappe.db.exists("Workspace", workspace_name):
         return
 
@@ -33,8 +92,8 @@ def _ensure_workspace_page_shortcut(workspace_name, label, page_name, color):
             "parenttype": "Workspace",
             "parentfield": "shortcuts",
             "label": label,
-            "type": "Page",
-            "link_to": page_name,
+            "type": shortcut_type,
+            "link_to": link_to,
         },
     )
     if not has_shortcut:
@@ -54,8 +113,8 @@ def _ensure_workspace_page_shortcut(workspace_name, label, page_name, color):
                 "parentfield": "shortcuts",
                 "idx": next_idx,
                 "label": label,
-                "type": "Page",
-                "link_to": page_name,
+                "type": shortcut_type,
+                "link_to": link_to,
                 "color": color,
             }
         ).db_insert(ignore_if_duplicate=True)
@@ -93,6 +152,14 @@ def _ensure_workspace_page_shortcut(workspace_name, label, page_name, color):
 
     if changed:
         frappe.clear_document_cache("Workspace", workspace_name)
+
+
+def _ensure_workspace_page_shortcut(workspace_name, label, page_name, color):
+    _ensure_workspace_shortcut(workspace_name, label, "Page", page_name, color)
+
+
+def _ensure_workspace_report_shortcut(workspace_name, label, report_name, color):
+    _ensure_workspace_shortcut(workspace_name, label, "Report", report_name, color)
 
 
 def remove_workspace_page_shortcut(workspace_name, label, page_name):
@@ -155,6 +222,29 @@ def ensure_manufacturing_sales_order_status_board_shortcut():
 def ensure_manufacturing_manage_sales_orders_shortcut():
     _ensure_workspace_page_shortcut(
         "Manufacturing", "Manage Sales Orders", "manage-sales-orders", "cyan"
+    )
+
+
+def ensure_order_tracking_workspace():
+    _ensure_workspace(
+        "Order Tracking",
+        title="Order Tracking",
+        icon="branch",
+        sequence_id=8.1,
+        parent_page="",
+    )
+
+
+def ensure_order_tracking_workspace_shortcuts():
+    _ensure_workspace_page_shortcut("Order Tracking", "Sales Order Live", "sales-order-live", "blue")
+    _ensure_workspace_page_shortcut("Order Tracking", "Live Work Order", "live-work-order", "green")
+    _ensure_workspace_page_shortcut("Order Tracking", "Manage Sales Orders", "manage-sales-orders", "cyan")
+    _ensure_workspace_page_shortcut(
+        "Order Tracking", "Sales Order Status Board", "sales-order-status-board", "orange"
+    )
+    _ensure_workspace_page_shortcut("Order Tracking", "Finanicals", "finanicals", "grey")
+    _ensure_workspace_report_shortcut(
+        "Order Tracking", "Purchase Order Updated Status", "Purchase Order updated Status", "yellow"
     )
 
 
