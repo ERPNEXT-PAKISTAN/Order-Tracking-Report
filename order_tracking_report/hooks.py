@@ -15,6 +15,10 @@ fixtures = [
 		"filters": [["name", "in", ["Live Work Order", "Work Order"]]],
 	},
 	{
+		"dt": "Web Page",
+		"filters": [["name", "in", ["finanicals"]]],
+	},
+	{
 		"dt": "Property Setter",
 		"filters": [["doc_type", "=", "Sales Order"]],
 	},
@@ -24,7 +28,7 @@ fixtures = [
 	},
 	{
 		"dt": "Server Script",
-		"filters": [["name", "in", ["Work Order", "live_production_api"]]],
+		"filters": [["name", "in", ["Work Order", "live_production_api", "fin_sight_dashboard_api"]]],
 	},
 ]
 
