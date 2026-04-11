@@ -398,7 +398,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				frappe.show_alert({ message: __("PL by Order failed: {0}", [data.error || __("Unknown error")]), indicator: "red" }, 7);
 				return;
 			}
-			if (data.sales_order && !salesOrder) {
+			if (data.sales_order && !salesOrder && (!data.linked_sales_orders || data.linked_sales_orders.length <= 1)) {
 				this.plControls.sales_order.set_value(data.sales_order);
 			}
 			this.renderPlByOrder(data);
@@ -418,12 +418,14 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		const statementRows = data.statement_rows || [];
 		const itemGroupSummary = data.item_group_summary || [];
 		const hierarchicalStatementRows = data.hierarchical_statement_rows || [];
+		const linkedSalesOrders = data.linked_sales_orders || [];
 		const selectedDn = data.selected_delivery_note || "";
 		const modeLabel = selectedDn
 			? __("Showing Delivery Note level allocation using Sales Order default BOM costs.")
 			: __("Showing Sales Order level estimated profit and loss.");
 
-		this.$plStatus.text(`${__("Sales Order")}: ${data.sales_order || "-"}${selectedDn ? ` • ${__("Delivery Note")}: ${selectedDn}` : ""}`);
+		const salesOrderText = linkedSalesOrders.length > 1 ? linkedSalesOrders.join(", ") : (data.sales_order || "-");
+		this.$plStatus.text(`${__("Sales Order")}: ${salesOrderText}${selectedDn ? ` • ${__("Delivery Note")}: ${selectedDn}` : ""}`);
 
 		const html = `
 			<div class="otr-pl-note">${frappe.utils.escape_html(modeLabel)}</div>

@@ -269,7 +269,7 @@ def ensure_sales_order_wastage_mode_fields():
                 "fieldtype": "Select",
                 "options": "\nIndividual\nWastage\nManual\nPO\nGlobal Manual %",
                 "insert_after": "custom_wastages",
-                "default": "Individual",
+                "default": "Wastage",
             },
             {
                 "fieldname": "custom_manual_wastage_percent",

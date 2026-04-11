@@ -62,7 +62,7 @@ def _escape_like_pattern(value):
     return re.sub(r"[^A-Za-z0-9]+", " ", (value or "").strip()).strip().lower()
 
 
-def _resolve_sales_order_from_delivery_note(delivery_note, preferred_sales_order=None):
+def _get_sales_orders_from_delivery_note(delivery_note):
     rows = frappe.db.sql(
         """
         SELECT DISTINCT against_sales_order
@@ -74,13 +74,30 @@ def _resolve_sales_order_from_delivery_note(delivery_note, preferred_sales_order
         {"delivery_note": delivery_note},
         as_dict=True,
     )
-    so_names = [row.get("against_sales_order") for row in rows if row.get("against_sales_order")]
+    return [row.get("against_sales_order") for row in rows if row.get("against_sales_order")]
+
+
+def _resolve_sales_order_from_delivery_note(delivery_note, preferred_sales_order=None):
+    so_names = _get_sales_orders_from_delivery_note(delivery_note)
     if not so_names:
         return ""
     preferred_sales_order = (preferred_sales_order or "").strip()
     if preferred_sales_order and preferred_sales_order in so_names:
         return preferred_sales_order
     return so_names[0]
+
+
+def _get_delivery_note_items(delivery_note):
+    return frappe.db.sql(
+        """
+        SELECT item_code, qty, rate, amount, against_sales_order
+        FROM `tabDelivery Note Item`
+        WHERE parent = %(delivery_note)s
+        ORDER BY idx
+        """,
+        {"delivery_note": delivery_note},
+        as_dict=True,
+    )
 
 
 def _aggregate_qty_by_item(rows):
@@ -130,6 +147,9 @@ def _compute_selected_profit(order_profit_rows, selected_items):
     for row in order_profit_rows or []:
         item_code = (row.get("item_code") or "").strip()
         if item_code:
+            sales_order = (row.get("sales_order") or "").strip()
+            if sales_order:
+                lookup[(sales_order, item_code)] = row
             lookup[item_code] = row
 
     aggregated = {}
@@ -137,9 +157,11 @@ def _compute_selected_profit(order_profit_rows, selected_items):
         item_code = (row.get("item_code") or "").strip()
         if not item_code:
             continue
+        sales_order = (row.get("against_sales_order") or "").strip()
         entry = aggregated.setdefault(
-            item_code,
+            (sales_order, item_code),
             {
+                "sales_order": sales_order,
                 "item_code": item_code,
                 "qty": 0,
                 "sales_amount": 0,
@@ -151,8 +173,8 @@ def _compute_selected_profit(order_profit_rows, selected_items):
     items = []
     total_sales = 0
     total_cost = 0
-    for item_code, row in aggregated.items():
-        order_row = lookup.get(item_code) or {}
+    for (_, item_code), row in aggregated.items():
+        order_row = lookup.get((row.get("sales_order") or "", item_code)) or lookup.get(item_code) or {}
         order_qty = frappe.utils.flt(order_row.get("qty"))
         unit_cost = (frappe.utils.flt(order_row.get("estimated_cost")) / order_qty) if order_qty else 0
         estimated_cost = unit_cost * frappe.utils.flt(row.get("qty"))
@@ -162,6 +184,7 @@ def _compute_selected_profit(order_profit_rows, selected_items):
         items.append(
             {
                 "item_code": item_code,
+                "sales_order": row.get("sales_order") or "",
                 "qty": row.get("qty") or 0,
                 "default_bom": order_row.get("default_bom") or "",
                 "bom_unit_cost": order_row.get("bom_unit_cost") or 0,
@@ -184,6 +207,118 @@ def _compute_selected_profit(order_profit_rows, selected_items):
             "margin_pct": round(margin_pct, 2),
         },
         "items": items,
+    }
+
+
+def _merge_profit_rows(payloads):
+    rows = []
+    summary = {
+        "sales_amount": 0,
+        "estimated_cost": 0,
+        "estimated_profit": 0,
+        "margin_pct": 0,
+    }
+
+    for payload in payloads:
+        sales_order = (payload.get("sales_order") or "").strip()
+        payload_summary = payload.get("profit_summary") or {}
+        summary["sales_amount"] = summary["sales_amount"] + frappe.utils.flt(payload_summary.get("sales_amount"))
+        summary["estimated_cost"] = summary["estimated_cost"] + frappe.utils.flt(payload_summary.get("estimated_cost"))
+        summary["estimated_profit"] = summary["estimated_profit"] + frappe.utils.flt(payload_summary.get("estimated_profit"))
+
+        for row in payload.get("profit_by_item") or []:
+            new_row = dict(row)
+            new_row["sales_order"] = sales_order
+            rows.append(new_row)
+
+    if summary["sales_amount"]:
+        summary["margin_pct"] = round(summary["estimated_profit"] * 100.0 / summary["sales_amount"], 2)
+
+    return rows, summary
+
+
+def _merge_delivery_note_options(payloads):
+    options = {}
+    for payload in payloads:
+        for row in payload.get("sales_fulfillment_hierarchy") or []:
+            delivery_note = (row.get("delivery_note") or "").strip()
+            if not delivery_note:
+                continue
+            entry = options.setdefault(
+                delivery_note,
+                {
+                    "delivery_note": delivery_note,
+                    "status": row.get("status") or "",
+                    "posting_date": row.get("posting_date") or "",
+                    "invoice_count": 0,
+                },
+            )
+            entry["invoice_count"] = max(entry["invoice_count"], len(row.get("invoices") or []))
+    return [options[key] for key in sorted(options)]
+
+
+def _merge_fulfillment_rows(payloads):
+    rows = {}
+    for payload in payloads:
+        for row in payload.get("sales_fulfillment_hierarchy") or []:
+            delivery_note = (row.get("delivery_note") or "").strip()
+            if not delivery_note:
+                continue
+            entry = rows.setdefault(
+                delivery_note,
+                {
+                    "delivery_note": delivery_note,
+                    "status": row.get("status") or "",
+                    "posting_date": row.get("posting_date") or "",
+                    "invoices": [],
+                },
+            )
+            invoice_names = {invoice.get("name") for invoice in entry.get("invoices") or [] if invoice.get("name")}
+            for invoice in row.get("invoices") or []:
+                if invoice.get("name") and invoice.get("name") not in invoice_names:
+                    entry["invoices"].append(invoice)
+    return [rows[key] for key in sorted(rows)]
+
+
+def _merge_group_amounts(rows, key_field, amount_fields):
+    grouped = {}
+    for row in rows or []:
+        key = (row.get(key_field) or "Unclassified").strip() or "Unclassified"
+        entry = grouped.setdefault(key, {key_field: key})
+        for amount_field in amount_fields:
+            entry[amount_field] = frappe.utils.flt(entry.get(amount_field)) + frappe.utils.flt(row.get(amount_field))
+    return [grouped[key] for key in sorted(grouped)]
+
+
+def _merge_payloads(payloads):
+    profit_rows, profit_summary = _merge_profit_rows(payloads)
+    delivery_note_options = _merge_delivery_note_options(payloads)
+    fulfillment_rows = _merge_fulfillment_rows(payloads)
+    bom_tree = []
+    labour_rows = []
+    material_shortage = []
+    purchase_flow_rows = []
+
+    for payload in payloads:
+        bom_tree.extend(payload.get("bom_tree") or [])
+        labour_rows.extend(payload.get("labour_cost_employee_item_wise") or [])
+        material_shortage.extend(payload.get("material_shortage") or [])
+        purchase_flow_rows.extend(payload.get("purchase_flow_rows") or [])
+
+    return {
+        "profit_by_item": profit_rows,
+        "profit_summary": profit_summary,
+        "delivery_note_options": delivery_note_options,
+        "sales_fulfillment_hierarchy": fulfillment_rows,
+        "po_item_group_summary": _merge_group_amounts(
+            [row for payload in payloads for row in (payload.get("po_item_group_summary") or [])],
+            "item_group",
+            ["po_amount"],
+        ),
+        "bom_tree": bom_tree,
+        "material_shortage": material_shortage,
+        "labour_cost_employee_item_wise": labour_rows,
+        "purchase_flow_rows": purchase_flow_rows,
     }
 
 
@@ -826,14 +961,25 @@ def get_sales_order_pl_by_order(sales_order=None, delivery_note=None):
     try:
         sales_order = (sales_order or "").strip()
         delivery_note = (delivery_note or "").strip()
+        linked_sales_orders = []
 
         if delivery_note:
+            linked_sales_orders = _get_sales_orders_from_delivery_note(delivery_note)
             sales_order = _resolve_sales_order_from_delivery_note(delivery_note, sales_order) or sales_order
+        elif sales_order:
+            linked_sales_orders = [sales_order]
 
         if not sales_order:
             frappe.throw("Sales Order or Delivery Note is required")
 
-        base_payload = run_detail_status(sales_order=sales_order) or {}
+        payload_sales_orders = linked_sales_orders or [sales_order]
+        payloads = []
+        for payload_sales_order in payload_sales_orders:
+            payload = run_detail_status(sales_order=payload_sales_order) or {}
+            payload["sales_order"] = payload_sales_order
+            payloads.append(payload)
+
+        base_payload = _merge_payloads(payloads) if len(payloads) > 1 else (payloads[0] if payloads else {})
         profit_rows = base_payload.get("profit_by_item") or []
         profit_summary = base_payload.get("profit_summary") or {}
         fulfillment_rows = base_payload.get("sales_fulfillment_hierarchy") or []
@@ -843,17 +989,7 @@ def get_sales_order_pl_by_order(sales_order=None, delivery_note=None):
             for row in profit_rows
             if (row.get("item_code") or "").strip()
         }
-
-        delivery_note_options = [
-            {
-                "delivery_note": row.get("delivery_note") or "",
-                "status": row.get("status") or "",
-                "posting_date": row.get("posting_date") or "",
-                "invoice_count": len(row.get("invoices") or []),
-            }
-            for row in fulfillment_rows
-            if row.get("delivery_note")
-        ]
+        delivery_note_options = base_payload.get("delivery_note_options") or []
 
         selected_delivery_meta = {}
         selected_delivery_items = []
@@ -869,7 +1005,7 @@ def get_sales_order_pl_by_order(sales_order=None, delivery_note=None):
                 docname=delivery_note,
             ) or {}
             selected_delivery_meta = delivery_payload.get("meta") or {}
-            selected_delivery_items = delivery_payload.get("items") or []
+            selected_delivery_items = _get_delivery_note_items(delivery_note)
             selected_qty_by_item = _aggregate_qty_by_item(selected_delivery_items)
             selected_profit = _compute_selected_profit(profit_rows, selected_delivery_items)
             selected_profit_summary = selected_profit.get("summary") or {}
@@ -911,6 +1047,7 @@ def get_sales_order_pl_by_order(sales_order=None, delivery_note=None):
 
         return {
             "sales_order": sales_order,
+            "linked_sales_orders": linked_sales_orders,
             "selected_delivery_note": delivery_note,
             "delivery_note_options": delivery_note_options,
             "delivery_note_meta": selected_delivery_meta,

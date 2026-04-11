@@ -656,12 +656,14 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
     # ---------------------------------------------------------
     def get_order_item_summary(so):
         so_items = safe_sql(
-            "SELECT item_code, item_name, qty "
+            "SELECT name, item_code, item_name, qty "
             "FROM `tabSales Order Item` "
             "WHERE parent = %(so)s "
             "ORDER BY idx",
             {"so": so}
         )
+
+        so_item_names = [row.get("name") for row in so_items if row.get("name")]
     
         dn_rows = safe_sql(
             "SELECT item_code, SUM(qty) AS delivered_qty "
@@ -686,9 +688,97 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
         invoiced_map = {}
         for r in si_rows:
             invoiced_map[r.get("item_code")] = to_float(r.get("invoiced_qty"))
+
+        production_plan_rows = []
+        work_order_rows = []
+
+        if so_item_names:
+            production_plan_rows = safe_sql(
+                "SELECT DISTINCT ppi.parent AS production_plan, pp.status AS production_plan_status, "
+                "ppi.sales_order_item, ppi.item_code "
+                "FROM `tabProduction Plan Item` ppi "
+                "JOIN `tabProduction Plan` pp ON pp.name = ppi.parent "
+                "WHERE ppi.sales_order = %(so)s OR ppi.sales_order_item IN %(so_items)s "
+                "ORDER BY pp.modified DESC LIMIT 2000",
+                {"so": so, "so_items": tuple(so_item_names)}
+            )
+            work_order_rows = safe_sql(
+                "SELECT DISTINCT wo.name AS work_order, wo.status AS work_order_status, wo.production_plan, "
+                "wo.sales_order_item, wo.production_item AS item_code "
+                "FROM `tabWork Order` wo "
+                "WHERE wo.sales_order = %(so)s OR wo.sales_order_item IN %(so_items)s "
+                "ORDER BY wo.modified DESC LIMIT 2000",
+                {"so": so, "so_items": tuple(so_item_names)}
+            )
+        else:
+            production_plan_rows = safe_sql(
+                "SELECT DISTINCT ppi.parent AS production_plan, pp.status AS production_plan_status, "
+                "ppi.sales_order_item, ppi.item_code "
+                "FROM `tabProduction Plan Item` ppi "
+                "JOIN `tabProduction Plan` pp ON pp.name = ppi.parent "
+                "WHERE ppi.sales_order = %(so)s "
+                "ORDER BY pp.modified DESC LIMIT 2000",
+                {"so": so}
+            )
+            work_order_rows = safe_sql(
+                "SELECT DISTINCT wo.name AS work_order, wo.status AS work_order_status, wo.production_plan, "
+                "wo.sales_order_item, wo.production_item AS item_code "
+                "FROM `tabWork Order` wo "
+                "WHERE wo.sales_order = %(so)s "
+                "ORDER BY wo.modified DESC LIMIT 2000",
+                {"so": so}
+            )
+
+        planning_links_by_so_item = {}
+        planning_links_by_item = {}
+
+        def ensure_planning_bucket(key, bucket_map):
+            if not key:
+                return None
+            if key not in bucket_map:
+                bucket_map[key] = {
+                    "pp_list": [],
+                    "pp_statuses": [],
+                    "wo_list": [],
+                    "wo_statuses": [],
+                }
+            return bucket_map[key]
+
+        def append_unique(target, value):
+            if value and value not in target:
+                target.append(value)
+
+        for row in production_plan_rows:
+            sales_order_item = row.get("sales_order_item") or ""
+            item_code = row.get("item_code") or ""
+            plan_name = row.get("production_plan") or ""
+            plan_status = row.get("production_plan_status") or ""
+
+            for bucket in filter(None, [
+                ensure_planning_bucket(sales_order_item, planning_links_by_so_item),
+                ensure_planning_bucket(item_code, planning_links_by_item),
+            ]):
+                append_unique(bucket["pp_list"], plan_name)
+                append_unique(bucket["pp_statuses"], plan_status)
+
+        for row in work_order_rows:
+            sales_order_item = row.get("sales_order_item") or ""
+            item_code = row.get("item_code") or ""
+            work_order = row.get("work_order") or ""
+            work_order_status = row.get("work_order_status") or ""
+            production_plan = row.get("production_plan") or ""
+
+            for bucket in filter(None, [
+                ensure_planning_bucket(sales_order_item, planning_links_by_so_item),
+                ensure_planning_bucket(item_code, planning_links_by_item),
+            ]):
+                append_unique(bucket["wo_list"], work_order)
+                append_unique(bucket["wo_statuses"], work_order_status)
+                append_unique(bucket["pp_list"], production_plan)
     
         out = []
         for r in so_items:
+            sales_order_item = r.get("name") or ""
             item_code = r.get("item_code")
             ordered = to_float(r.get("qty"))
             delivered = delivered_map.get(item_code, 0)
@@ -696,14 +786,21 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
             pending = ordered - delivered
             if pending < 0:
                 pending = 0
+
+            links = planning_links_by_so_item.get(sales_order_item) or planning_links_by_item.get(item_code) or {}
     
             out.append({
+                "sales_order_item": sales_order_item,
                 "item_code": item_code,
                 "item_name": r.get("item_name") or "",
                 "ordered_qty": ordered,
                 "delivered_qty": delivered,
                 "invoiced_qty": invoiced,
-                "pending_qty": pending
+                "pending_qty": pending,
+                "pp_list": links.get("pp_list") or [],
+                "pp_statuses": links.get("pp_statuses") or [],
+                "wo_list": links.get("wo_list") or [],
+                "wo_statuses": links.get("wo_statuses") or [],
             })
     
         return out
@@ -2117,6 +2214,247 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                 r["status"] = po_map.get(r.get("name")) or r.get("status")
             out.append(r)
         return out
+
+
+    def get_item_document_links(so):
+        so_items = safe_sql(
+            "SELECT name, item_code, item_name "
+            "FROM `tabSales Order Item` "
+            "WHERE parent = %(so)s "
+            "ORDER BY idx",
+            {"so": so}
+        )
+
+        so_item_names = [row.get("name") for row in so_items if row.get("name")]
+
+        links_by_so_item = {}
+        links_by_item = {}
+
+        def ensure_bucket(key, store):
+            if not key:
+                return None
+            if key not in store:
+                store[key] = {
+                    "production_plans": [],
+                    "work_orders": [],
+                    "job_cards": [],
+                    "stock_entries": [],
+                    "delivery_notes": [],
+                    "sales_invoices": [],
+                }
+            return store[key]
+
+        def append_doc(target, payload):
+            if target is None or not payload or not payload.get("name"):
+                return
+            name = payload.get("name")
+            if not any(existing.get("name") == name for existing in target):
+                target.append(payload)
+
+        def push_doc(sales_order_item, item_code, doc_key, payload):
+            for bucket in filter(None, [
+                ensure_bucket(sales_order_item, links_by_so_item),
+                ensure_bucket(item_code, links_by_item),
+            ]):
+                append_doc(bucket.get(doc_key), payload)
+
+        if so_item_names:
+            production_plan_rows = safe_sql(
+                "SELECT DISTINCT ppi.parent AS name, pp.status, ppi.sales_order_item, ppi.item_code "
+                "FROM `tabProduction Plan Item` ppi "
+                "JOIN `tabProduction Plan` pp ON pp.name = ppi.parent "
+                "WHERE ppi.sales_order = %(so)s OR ppi.sales_order_item IN %(so_items)s "
+                "ORDER BY pp.modified DESC LIMIT 2000",
+                {"so": so, "so_items": tuple(so_item_names)}
+            )
+            work_order_rows = safe_sql(
+                "SELECT DISTINCT wo.name, wo.status, wo.production_plan, wo.sales_order_item, wo.production_item AS item_code, wo.qty, wo.produced_qty "
+                "FROM `tabWork Order` wo "
+                "WHERE wo.sales_order = %(so)s OR wo.sales_order_item IN %(so_items)s "
+                "ORDER BY wo.modified DESC LIMIT 2000",
+                {"so": so, "so_items": tuple(so_item_names)}
+            )
+            delivery_note_rows = safe_sql(
+                "SELECT DISTINCT dn.name, dn.status, dn.posting_date, dni.so_detail AS sales_order_item, dni.item_code "
+                "FROM `tabDelivery Note` dn "
+                "JOIN `tabDelivery Note Item` dni ON dni.parent = dn.name "
+                "WHERE dni.against_sales_order = %(so)s OR dni.so_detail IN %(so_items)s "
+                "ORDER BY dn.posting_date DESC, dn.modified DESC LIMIT 2000",
+                {"so": so, "so_items": tuple(so_item_names)}
+            )
+            sales_invoice_rows = safe_sql(
+                "SELECT DISTINCT si.name, si.status, si.posting_date, sii.so_detail AS sales_order_item, sii.item_code, sii.delivery_note "
+                "FROM `tabSales Invoice` si "
+                "JOIN `tabSales Invoice Item` sii ON sii.parent = si.name "
+                "WHERE sii.sales_order = %(so)s OR sii.so_detail IN %(so_items)s "
+                "ORDER BY si.posting_date DESC, si.modified DESC LIMIT 2000",
+                {"so": so, "so_items": tuple(so_item_names)}
+            )
+        else:
+            production_plan_rows = safe_sql(
+                "SELECT DISTINCT ppi.parent AS name, pp.status, ppi.sales_order_item, ppi.item_code "
+                "FROM `tabProduction Plan Item` ppi "
+                "JOIN `tabProduction Plan` pp ON pp.name = ppi.parent "
+                "WHERE ppi.sales_order = %(so)s "
+                "ORDER BY pp.modified DESC LIMIT 2000",
+                {"so": so}
+            )
+            work_order_rows = safe_sql(
+                "SELECT DISTINCT wo.name, wo.status, wo.production_plan, wo.sales_order_item, wo.production_item AS item_code, wo.qty, wo.produced_qty "
+                "FROM `tabWork Order` wo "
+                "WHERE wo.sales_order = %(so)s "
+                "ORDER BY wo.modified DESC LIMIT 2000",
+                {"so": so}
+            )
+            delivery_note_rows = safe_sql(
+                "SELECT DISTINCT dn.name, dn.status, dn.posting_date, dni.so_detail AS sales_order_item, dni.item_code "
+                "FROM `tabDelivery Note` dn "
+                "JOIN `tabDelivery Note Item` dni ON dni.parent = dn.name "
+                "WHERE dni.against_sales_order = %(so)s "
+                "ORDER BY dn.posting_date DESC, dn.modified DESC LIMIT 2000",
+                {"so": so}
+            )
+            sales_invoice_rows = safe_sql(
+                "SELECT DISTINCT si.name, si.status, si.posting_date, sii.so_detail AS sales_order_item, sii.item_code, sii.delivery_note "
+                "FROM `tabSales Invoice` si "
+                "JOIN `tabSales Invoice Item` sii ON sii.parent = si.name "
+                "WHERE sii.sales_order = %(so)s "
+                "ORDER BY si.posting_date DESC, si.modified DESC LIMIT 2000",
+                {"so": so}
+            )
+
+        for row in production_plan_rows:
+            push_doc(
+                row.get("sales_order_item") or "",
+                row.get("item_code") or "",
+                "production_plans",
+                {
+                    "name": row.get("name") or "",
+                    "status": row.get("status") or "—",
+                }
+            )
+
+        work_order_names = []
+        work_order_key_map = {}
+        for row in work_order_rows:
+            payload = {
+                "name": row.get("name") or "",
+                "status": row.get("status") or "—",
+                "production_plan": row.get("production_plan") or "",
+                "qty": to_float(row.get("qty")),
+                "produced_qty": to_float(row.get("produced_qty")),
+            }
+            push_doc(
+                row.get("sales_order_item") or "",
+                row.get("item_code") or "",
+                "work_orders",
+                payload
+            )
+            if row.get("name"):
+                work_order_names.append(row.get("name"))
+                work_order_key_map[row.get("name")] = {
+                    "sales_order_item": row.get("sales_order_item") or "",
+                    "item_code": row.get("item_code") or "",
+                }
+
+        work_order_names = uniq_list(work_order_names)
+
+        if work_order_names:
+            job_card_rows = safe_sql(
+                "SELECT name, status, work_order, operation, workstation "
+                "FROM `tabJob Card` "
+                "WHERE work_order IN %(wo)s "
+                "ORDER BY modified DESC LIMIT 4000",
+                {"wo": tuple(work_order_names)}
+            )
+            stock_entry_rows = safe_sql(
+                "SELECT name, docstatus, purpose, posting_date, work_order "
+                "FROM `tabStock Entry` "
+                "WHERE work_order IN %(wo)s "
+                "ORDER BY posting_date DESC, modified DESC LIMIT 4000",
+                {"wo": tuple(work_order_names)}
+            )
+        else:
+            job_card_rows = []
+            stock_entry_rows = []
+
+        for row in job_card_rows:
+            key = work_order_key_map.get(row.get("work_order") or "") or {}
+            push_doc(
+                key.get("sales_order_item") or "",
+                key.get("item_code") or "",
+                "job_cards",
+                {
+                    "name": row.get("name") or "",
+                    "status": row.get("status") or "—",
+                    "work_order": row.get("work_order") or "",
+                    "operation": row.get("operation") or "",
+                    "workstation": row.get("workstation") or "",
+                }
+            )
+
+        for row in stock_entry_rows:
+            key = work_order_key_map.get(row.get("work_order") or "") or {}
+            status = "Draft"
+            if int(to_float(row.get("docstatus"))) == 1:
+                status = "Submitted"
+            elif int(to_float(row.get("docstatus"))) == 2:
+                status = "Cancelled"
+            push_doc(
+                key.get("sales_order_item") or "",
+                key.get("item_code") or "",
+                "stock_entries",
+                {
+                    "name": row.get("name") or "",
+                    "status": status,
+                    "purpose": row.get("purpose") or "",
+                    "posting_date": fmt_date(row.get("posting_date")),
+                    "work_order": row.get("work_order") or "",
+                }
+            )
+
+        for row in delivery_note_rows:
+            push_doc(
+                row.get("sales_order_item") or "",
+                row.get("item_code") or "",
+                "delivery_notes",
+                {
+                    "name": row.get("name") or "",
+                    "status": row.get("status") or "—",
+                    "posting_date": fmt_date(row.get("posting_date")),
+                }
+            )
+
+        for row in sales_invoice_rows:
+            push_doc(
+                row.get("sales_order_item") or "",
+                row.get("item_code") or "",
+                "sales_invoices",
+                {
+                    "name": row.get("name") or "",
+                    "status": row.get("status") or "—",
+                    "posting_date": fmt_date(row.get("posting_date")),
+                    "delivery_note": row.get("delivery_note") or "",
+                }
+            )
+
+        out = []
+        for row in so_items:
+            sales_order_item = row.get("name") or ""
+            item_code = row.get("item_code") or ""
+            links = links_by_so_item.get(sales_order_item) or links_by_item.get(item_code) or {}
+            out.append({
+                "sales_order_item": sales_order_item,
+                "item_code": item_code,
+                "item_name": row.get("item_name") or item_code,
+                "production_plans": links.get("production_plans") or [],
+                "work_orders": links.get("work_orders") or [],
+                "job_cards": links.get("job_cards") or [],
+                "stock_entries": links.get("stock_entries") or [],
+                "delivery_notes": links.get("delivery_notes") or [],
+                "sales_invoices": links.get("sales_invoices") or [],
+            })
+        return out
     
     # ---------------------------------------------------------
     # MAIN
@@ -2146,6 +2484,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
             "profit_summary": {},
             "profit_by_item": [],
             "order_item_summary": [],
+            "item_document_links": [],
             "custom_po_analytics": {
                 "overview": {},
                 "po_status_rows": [],
@@ -2189,6 +2528,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
             "profit_summary": profit_data.get("summary") or {},
             "profit_by_item": profit_data.get("items") or [],
             "order_item_summary": get_order_item_summary(sales_order),
+            "item_document_links": get_item_document_links(sales_order),
             "custom_po_analytics": get_custom_po_analytics_with_items(sales_order),
             "purchase_flow_rows": get_purchase_flow_rows(sales_order),
             "labour_cost_employee_item_wise": labour_data.get("rows") or [],
