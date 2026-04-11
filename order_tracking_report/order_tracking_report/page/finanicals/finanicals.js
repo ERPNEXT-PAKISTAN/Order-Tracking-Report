@@ -209,6 +209,34 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			.otr-pl-table th.text-right {
 				text-align: right;
 			}
+			.otr-pl-table .otr-pl-h-row-group {
+				background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+				color: #ffffff;
+				font-weight: 800;
+			}
+			.otr-pl-table .otr-pl-h-row-item {
+				background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+				font-weight: 800;
+				color: #1e3a8a;
+			}
+			.otr-pl-table .otr-pl-h-row-subhead {
+				background: #ecfeff;
+				font-weight: 800;
+				color: #155e75;
+			}
+			.otr-pl-table .otr-pl-h-row-material-group {
+				background: #f1f5f9;
+				font-weight: 800;
+				color: #334155;
+			}
+			.otr-pl-table .otr-pl-h-row-sales,
+			.otr-pl-table .otr-pl-h-row-material,
+			.otr-pl-table .otr-pl-h-row-expense {
+				background: #ffffff;
+			}
+			.otr-pl-table .otr-pl-h-label {
+				white-space: nowrap;
+			}
 			.otr-pl-note {
 				padding: 12px 14px;
 				border-radius: 12px;
@@ -308,6 +336,16 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		return control;
 	}
 
+	getControlValue(control) {
+		if (!control) {
+			return "";
+		}
+
+		const committedValue = (control.get_value && control.get_value()) || "";
+		const inputValue = (control.$input && control.$input.val && control.$input.val()) || "";
+		return String(committedValue || inputValue || "").trim();
+	}
+
 	openPlByOrderTab() {
 		const tab = this.$root.find('[data-tab="pl-by-order"]');
 		if (tab.length) {
@@ -327,11 +365,18 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 	}
 
 	async loadPlByOrder() {
-		const salesOrder = (this.plControls.sales_order.get_value() || "").trim();
-		const deliveryNote = (this.plControls.delivery_note.get_value() || "").trim();
+		const salesOrder = this.getControlValue(this.plControls.sales_order);
+		const deliveryNote = this.getControlValue(this.plControls.delivery_note);
 		if (!salesOrder && !deliveryNote) {
 			frappe.show_alert({ message: __("Enter Sales Order or Delivery Note."), indicator: "orange" }, 4);
 			return;
+		}
+
+		if (salesOrder && this.plControls.sales_order.get_value() !== salesOrder) {
+			this.plControls.sales_order.set_value(salesOrder);
+		}
+		if (deliveryNote && this.plControls.delivery_note.get_value() !== deliveryNote) {
+			this.plControls.delivery_note.set_value(deliveryNote);
 		}
 
 		this.openPlByOrderTab();
@@ -347,6 +392,12 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				},
 			});
 			const data = response.message || {};
+			if (data.error) {
+				this.$plStatus.text(__("PL by Order could not be loaded."));
+				this.$plContent.html(`<div class="otr-pl-empty">${frappe.utils.escape_html(data.error || __("Unknown error"))}</div>`);
+				frappe.show_alert({ message: __("PL by Order failed: {0}", [data.error || __("Unknown error")]), indicator: "red" }, 7);
+				return;
+			}
 			if (data.sales_order && !salesOrder) {
 				this.plControls.sales_order.set_value(data.sales_order);
 			}
@@ -364,8 +415,9 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		const labourSummary = data.labour_cost_summary || {};
 		const deliveryNotes = data.delivery_note_options || [];
 		const invoiceDetails = data.invoice_details || [];
-			const statementRows = data.statement_rows || [];
-			const itemGroupSummary = data.item_group_summary || [];
+		const statementRows = data.statement_rows || [];
+		const itemGroupSummary = data.item_group_summary || [];
+		const hierarchicalStatementRows = data.hierarchical_statement_rows || [];
 		const selectedDn = data.selected_delivery_note || "";
 		const modeLabel = selectedDn
 			? __("Showing Delivery Note level allocation using Sales Order default BOM costs.")
@@ -385,14 +437,18 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			</div>
 			<div class="otr-pl-grid">
 				<div class="otr-pl-section">
-						<h3>${__("Profit and Loss Statement")}</h3>
-						${this.renderStatementTable(statementRows)}
-					</div>
-					<div class="otr-pl-section">
-						<h3>${__("Item Group Wise Summary")}</h3>
-						${this.renderItemGroupSummaryTable(itemGroupSummary)}
-					</div>
-					<div class="otr-pl-section">
+					<h3>${__("PL Statement by Item Hierarchy")}</h3>
+					${this.renderHierarchicalStatementTable(hierarchicalStatementRows)}
+				</div>
+				<div class="otr-pl-section">
+					<h3>${__("Profit and Loss Summary")}</h3>
+					${this.renderStatementTable(statementRows)}
+				</div>
+				<div class="otr-pl-section">
+					<h3>${__("Item Group Wise Summary")}</h3>
+					${this.renderItemGroupSummaryTable(itemGroupSummary)}
+				</div>
+				<div class="otr-pl-section">
 					<h3>${__("Profit by Item")}</h3>
 					${this.renderProfitTable(data.selected_profit_by_item || [])}
 				</div>
@@ -466,6 +522,36 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			`).join("");
 			return this.wrapTable(`
 				<thead><tr><th>${__("Statement Row")}</th><th class="text-right">${__("Amount")}</th></tr></thead>
+				<tbody>${body}</tbody>
+			`);
+		}
+
+		renderHierarchicalStatementTable(rows) {
+			if (!rows.length) {
+				return `<div class="otr-pl-empty">${__("No hierarchical statement rows found.")}</div>`;
+			}
+
+			const body = rows.map((row) => {
+				const level = Math.max(Number(row.level || 0), 0);
+				const rowType = row.row_type || "detail";
+				const indent = 14 + (level * 22);
+				const rowClass = `otr-pl-h-row-${frappe.utils.escape_html(rowType)}`;
+				return `
+					<tr class="${rowClass}">
+						<td class="otr-pl-h-label" style="padding-left: ${indent}px">${frappe.utils.escape_html(row.label || "-")}</td>
+						<td class="text-right">${this.formatNumber(row.qty || 0)}</td>
+						<td class="text-right">${this.formatCurrency(row.rate || 0)}</td>
+						<td class="text-right">${this.formatCurrency(row.sales_amount || 0)}</td>
+						<td class="text-right">${this.formatCurrency(row.material_cost || 0)}</td>
+						<td class="text-right">${this.formatCurrency(row.labour_cost || 0)}</td>
+						<td class="text-right">${this.formatCurrency(row.procurement_amount || 0)}</td>
+						<td class="text-right">${this.formatCurrency(row.profit_amount || 0)}</td>
+					</tr>
+				`;
+			}).join("");
+
+			return this.wrapTable(`
+				<thead><tr><th>${__("Head")}</th><th class="text-right">${__("Qty")}</th><th class="text-right">${__("Price")}</th><th class="text-right">${__("Sales")}</th><th class="text-right">${__("Raw Material Cost")}</th><th class="text-right">${__("Labour")}</th><th class="text-right">${__("Procurement")}</th><th class="text-right">${__("Profit")}</th></tr></thead>
 				<tbody>${body}</tbody>
 			`);
 		}

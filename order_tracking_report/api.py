@@ -62,7 +62,7 @@ def _escape_like_pattern(value):
     return re.sub(r"[^A-Za-z0-9]+", " ", (value or "").strip()).strip().lower()
 
 
-def _resolve_sales_order_from_delivery_note(delivery_note):
+def _resolve_sales_order_from_delivery_note(delivery_note, preferred_sales_order=None):
     rows = frappe.db.sql(
         """
         SELECT DISTINCT against_sales_order
@@ -77,8 +77,9 @@ def _resolve_sales_order_from_delivery_note(delivery_note):
     so_names = [row.get("against_sales_order") for row in rows if row.get("against_sales_order")]
     if not so_names:
         return ""
-    if len(so_names) > 1:
-        frappe.throw(f"Delivery Note {delivery_note} is linked with multiple Sales Orders")
+    preferred_sales_order = (preferred_sales_order or "").strip()
+    if preferred_sales_order and preferred_sales_order in so_names:
+        return preferred_sales_order
     return so_names[0]
 
 
@@ -259,6 +260,382 @@ def _build_statement_rows(selected_profit_summary, labour_summary, po_item_group
         {"label": "Procurement Amount", "amount": procurement_amount},
         {"label": "Net Profit After Procurement", "amount": net_profit_after_procurement},
     ]
+
+
+def _build_labour_cost_by_item(rows):
+    totals = {}
+    for row in rows or []:
+        item_code = (row.get("product") or row.get("item_code") or "").strip()
+        if not item_code:
+            continue
+        totals[item_code] = totals.get(item_code, 0) + frappe.utils.flt(row.get("labour_cost"))
+    return totals
+
+
+def _get_item_group_paths(item_groups):
+    pending = {(item_group or "").strip() for item_group in item_groups if (item_group or "").strip()}
+    group_meta = {}
+
+    while pending:
+        rows = frappe.get_all(
+            "Item Group",
+            filters={"name": ["in", sorted(pending)]},
+            fields=["name", "parent_item_group"],
+            limit_page_length=len(pending),
+        )
+        pending = set()
+        for row in rows:
+            name = (row.get("name") or "").strip()
+            parent = (row.get("parent_item_group") or "").strip()
+            if not name or name in group_meta:
+                continue
+            group_meta[name] = parent
+            if parent and parent not in group_meta and parent != "All Item Groups":
+                pending.add(parent)
+
+    paths = {}
+    for item_group in item_groups:
+        name = (item_group or "").strip()
+        if not name:
+            paths[item_group] = ["Unclassified"]
+            continue
+
+        path = []
+        current = name
+        visited = set()
+        while current and current not in visited and current != "All Item Groups":
+            visited.add(current)
+            path.append(current)
+            current = group_meta.get(current) or ""
+        paths[item_group] = list(reversed(path)) or [name]
+
+    return paths
+
+
+def _allocate_procurement_by_item(profit_rows, po_item_group_summary):
+    po_by_group = {
+        ((row.get("item_group") or "Unclassified").strip() or "Unclassified"): frappe.utils.flt(row.get("po_amount"))
+        for row in po_item_group_summary or []
+    }
+    grouped_items = {}
+    for row in profit_rows or []:
+        item_group = (row.get("item_group") or "Unclassified").strip() or "Unclassified"
+        grouped_items.setdefault(item_group, []).append(row)
+
+    allocations = {}
+    for item_group, rows in grouped_items.items():
+        total_po_amount = po_by_group.get(item_group)
+        if not total_po_amount:
+            continue
+
+        basis_values = []
+        for row in rows:
+            basis = frappe.utils.flt(row.get("estimated_cost")) or frappe.utils.flt(row.get("sales_amount")) or frappe.utils.flt(row.get("qty")) or 1
+            basis_values.append(((row.get("item_code") or "").strip(), basis))
+        total_basis = sum(basis for _, basis in basis_values) or 1
+
+        allocated = 0
+        for index, (item_code, basis) in enumerate(basis_values):
+            if not item_code:
+                continue
+            if index == len(basis_values) - 1:
+                amount = total_po_amount - allocated
+            else:
+                amount = total_po_amount * basis / total_basis
+                allocated = allocated + amount
+            allocations[item_code] = allocations.get(item_code, 0) + amount
+
+    return allocations
+
+
+def _build_material_rows_by_item(bom_rows, profit_rows):
+    profit_lookup = {
+        (row.get("item_code") or "").strip(): row
+        for row in profit_rows or []
+        if (row.get("item_code") or "").strip()
+    }
+    grouped = {}
+    for row in bom_rows or []:
+        item_code = (row.get("item_code") or "").strip()
+        material_code = (row.get("material_item_code") or "").strip()
+        if not item_code or not material_code:
+            continue
+        grouped.setdefault(item_code, []).append(row)
+
+    out = {}
+    for item_code, rows in grouped.items():
+        item_total_cost = frappe.utils.flt((profit_lookup.get(item_code) or {}).get("estimated_cost"))
+        total_required_qty = sum(frappe.utils.flt(row.get("required_qty")) for row in rows)
+        total_basis = total_required_qty if total_required_qty > 0 else len(rows) or 1
+        allocated = 0
+        item_rows = []
+
+        for index, row in enumerate(rows):
+            basis = frappe.utils.flt(row.get("required_qty")) if total_required_qty > 0 else 1
+            if index == len(rows) - 1:
+                material_cost = item_total_cost - allocated
+            else:
+                material_cost = item_total_cost * basis / total_basis
+                allocated = allocated + material_cost
+            item_rows.append(
+                {
+                    "label": row.get("material_item_code") or "-",
+                    "qty": frappe.utils.flt(row.get("required_qty")),
+                    "sales_amount": 0,
+                    "material_cost": material_cost,
+                    "labour_cost": 0,
+                    "procurement_amount": 0,
+                    "profit_amount": -material_cost,
+                }
+            )
+
+        out[item_code] = item_rows
+
+    return out
+
+
+def _attach_material_item_groups(material_rows_by_item):
+    material_codes = []
+    for rows in material_rows_by_item.values():
+        for row in rows:
+            material_codes.append(row.get("label"))
+
+    item_group_map = _get_item_group_map(material_codes)
+    for rows in material_rows_by_item.values():
+        for row in rows:
+            material_code = (row.get("label") or "").strip()
+            row["item_group"] = item_group_map.get(material_code, "Unclassified") or "Unclassified"
+
+    return material_rows_by_item
+
+
+def _make_statement_tree_node(label, level=0):
+    return {
+        "label": label,
+        "level": level,
+        "children": [],
+        "items": [],
+        "totals": {
+            "qty": 0,
+            "sales_amount": 0,
+            "material_cost": 0,
+            "labour_cost": 0,
+            "procurement_amount": 0,
+            "profit_amount": 0,
+        },
+    }
+
+
+def _build_hierarchical_statement_rows(profit_rows, bom_rows, labour_rows, po_item_group_summary):
+    if not profit_rows:
+        return []
+
+    labour_by_item = _build_labour_cost_by_item(labour_rows)
+    procurement_by_item = _allocate_procurement_by_item(profit_rows, po_item_group_summary)
+    material_rows_by_item = _attach_material_item_groups(_build_material_rows_by_item(bom_rows, profit_rows))
+    item_group_paths = _get_item_group_paths([row.get("item_group") for row in profit_rows])
+
+    root = _make_statement_tree_node("root", level=-1)
+    node_map = {(): root}
+
+    def get_or_create_node(path_parts):
+        path_key = tuple(path_parts)
+        if path_key in node_map:
+            return node_map[path_key]
+
+        parent = get_or_create_node(path_parts[:-1])
+        node = _make_statement_tree_node(path_parts[-1], level=len(path_parts) - 1)
+        parent["children"].append(node)
+        node_map[path_key] = node
+        return node
+
+    for profit_row in profit_rows:
+        item_code = (profit_row.get("item_code") or "").strip()
+        if not item_code:
+            continue
+
+        item_group = (profit_row.get("item_group") or "Unclassified").strip() or "Unclassified"
+        path_parts = item_group_paths.get(item_group) or [item_group]
+        parent_node = get_or_create_node(path_parts)
+
+        sales_amount = frappe.utils.flt(profit_row.get("sales_amount"))
+        qty = frappe.utils.flt(profit_row.get("qty"))
+        material_cost = frappe.utils.flt(profit_row.get("estimated_cost"))
+        labour_cost = labour_by_item.get(item_code, 0)
+        procurement_amount = procurement_by_item.get(item_code, 0)
+        profit_amount = sales_amount - material_cost - labour_cost - procurement_amount
+        material_rows = material_rows_by_item.get(item_code) or []
+
+        parent_node["items"].append(
+            {
+                "label": item_code,
+                "item_group": item_group,
+                "qty": qty,
+                "rate": (sales_amount / qty) if qty else 0,
+                "sales_amount": sales_amount,
+                "material_cost": material_cost,
+                "labour_cost": labour_cost,
+                "procurement_amount": procurement_amount,
+                "profit_amount": profit_amount,
+                "material_rows": material_rows,
+            }
+        )
+
+    def compute_totals(node):
+        totals = {
+            "qty": 0,
+            "sales_amount": 0,
+            "material_cost": 0,
+            "labour_cost": 0,
+            "procurement_amount": 0,
+            "profit_amount": 0,
+        }
+        for child in node["children"]:
+            child_totals = compute_totals(child)
+            for key in totals:
+                totals[key] = totals[key] + frappe.utils.flt(child_totals.get(key))
+        for item in node["items"]:
+            for key in totals:
+                totals[key] = totals[key] + frappe.utils.flt(item.get(key))
+        node["totals"] = totals
+        return totals
+
+    compute_totals(root)
+
+    out = []
+
+    def append_row(level, row_type, label, values, bold=False):
+        out.append(
+            {
+                "level": level,
+                "row_type": row_type,
+                "label": label,
+                "qty": frappe.utils.flt(values.get("qty")),
+                "rate": frappe.utils.flt(values.get("rate")),
+                "sales_amount": frappe.utils.flt(values.get("sales_amount")),
+                "material_cost": frappe.utils.flt(values.get("material_cost")),
+                "labour_cost": frappe.utils.flt(values.get("labour_cost")),
+                "procurement_amount": frappe.utils.flt(values.get("procurement_amount")),
+                "profit_amount": frappe.utils.flt(values.get("profit_amount")),
+                "bold": 1 if bold else 0,
+            }
+        )
+
+    def walk(node):
+        if node["level"] >= 0:
+            append_row(node["level"], "group", node["label"], node["totals"], bold=True)
+
+        for child in sorted(node["children"], key=lambda row: row.get("label") or ""):
+            walk(child)
+
+        for item in sorted(node["items"], key=lambda row: row.get("label") or ""):
+            item_level = node["level"] + 1
+            append_row(item_level, "item", item["label"], item, bold=True)
+            append_row(
+                item_level + 1,
+                "sales",
+                "Sales",
+                {
+                    "qty": item.get("qty"),
+                    "rate": item.get("rate"),
+                    "sales_amount": item.get("sales_amount"),
+                    "material_cost": 0,
+                    "labour_cost": 0,
+                    "procurement_amount": 0,
+                    "profit_amount": item.get("sales_amount"),
+                },
+            )
+
+            append_row(
+                item_level + 1,
+                "subhead",
+                "Raw Materials",
+                {
+                    "qty": item.get("qty"),
+                    "rate": 0,
+                    "sales_amount": 0,
+                    "material_cost": item.get("material_cost"),
+                    "labour_cost": 0,
+                    "procurement_amount": 0,
+                    "profit_amount": -frappe.utils.flt(item.get("material_cost")),
+                },
+                bold=True,
+            )
+            material_groups = {}
+            for material_row in item.get("material_rows") or []:
+                material_group = (material_row.get("item_group") or "Unclassified").strip() or "Unclassified"
+                entry = material_groups.setdefault(
+                    material_group,
+                    {
+                        "qty": 0,
+                        "rate": 0,
+                        "sales_amount": 0,
+                        "material_cost": 0,
+                        "labour_cost": 0,
+                        "procurement_amount": 0,
+                        "profit_amount": 0,
+                        "rows": [],
+                    },
+                )
+                entry["qty"] = entry["qty"] + frappe.utils.flt(material_row.get("qty"))
+                entry["material_cost"] = entry["material_cost"] + frappe.utils.flt(material_row.get("material_cost"))
+                entry["profit_amount"] = entry["profit_amount"] + frappe.utils.flt(material_row.get("profit_amount"))
+                entry["rows"].append(material_row)
+
+            for material_group in sorted(material_groups):
+                material_group_row = material_groups.get(material_group) or {}
+                append_row(item_level + 2, "material-group", material_group, material_group_row, bold=True)
+                for material_row in material_group_row.get("rows") or []:
+                    append_row(item_level + 3, "material", material_row.get("label"), material_row)
+
+            append_row(
+                item_level + 1,
+                "subhead",
+                "Expenses",
+                {
+                    "qty": 0,
+                    "rate": 0,
+                    "sales_amount": 0,
+                    "material_cost": 0,
+                    "labour_cost": item.get("labour_cost"),
+                    "procurement_amount": item.get("procurement_amount"),
+                    "profit_amount": -(frappe.utils.flt(item.get("labour_cost")) + frappe.utils.flt(item.get("procurement_amount"))),
+                },
+                bold=True,
+            )
+            if frappe.utils.flt(item.get("labour_cost")):
+                append_row(
+                    item_level + 2,
+                    "expense",
+                    "Labour Cost",
+                    {
+                        "qty": 0,
+                        "rate": 0,
+                        "sales_amount": 0,
+                        "material_cost": 0,
+                        "labour_cost": item.get("labour_cost"),
+                        "procurement_amount": 0,
+                        "profit_amount": -frappe.utils.flt(item.get("labour_cost")),
+                    },
+                )
+            if frappe.utils.flt(item.get("procurement_amount")):
+                append_row(
+                    item_level + 2,
+                    "expense",
+                    "Procurement Amount",
+                    {
+                        "qty": 0,
+                        "rate": 0,
+                        "sales_amount": 0,
+                        "material_cost": 0,
+                        "labour_cost": 0,
+                        "procurement_amount": item.get("procurement_amount"),
+                        "profit_amount": -frappe.utils.flt(item.get("procurement_amount")),
+                    },
+                )
+
+    walk(root)
+    return out
 
 
 def _scale_labour_rows(rows, selected_qty_by_item, order_qty_by_item):
@@ -446,107 +823,120 @@ def fin_gold_rate_api():
 
 @frappe.whitelist()
 def get_sales_order_pl_by_order(sales_order=None, delivery_note=None):
-    sales_order = (sales_order or "").strip()
-    delivery_note = (delivery_note or "").strip()
+    try:
+        sales_order = (sales_order or "").strip()
+        delivery_note = (delivery_note or "").strip()
 
-    if delivery_note and not sales_order:
-        sales_order = _resolve_sales_order_from_delivery_note(delivery_note)
+        if delivery_note:
+            sales_order = _resolve_sales_order_from_delivery_note(delivery_note, sales_order) or sales_order
 
-    if not sales_order:
-        frappe.throw("Sales Order or Delivery Note is required")
+        if not sales_order:
+            frappe.throw("Sales Order or Delivery Note is required")
 
-    base_payload = run_detail_status(sales_order=sales_order) or {}
-    profit_rows = base_payload.get("profit_by_item") or []
-    profit_summary = base_payload.get("profit_summary") or {}
-    fulfillment_rows = base_payload.get("sales_fulfillment_hierarchy") or []
-    po_item_group_summary = base_payload.get("po_item_group_summary") or []
-    order_qty_by_item = {
-        (row.get("item_code") or "").strip(): frappe.utils.flt(row.get("qty"))
-        for row in profit_rows
-        if (row.get("item_code") or "").strip()
-    }
-
-    delivery_note_options = [
-        {
-            "delivery_note": row.get("delivery_note") or "",
-            "status": row.get("status") or "",
-            "posting_date": row.get("posting_date") or "",
-            "invoice_count": len(row.get("invoices") or []),
+        base_payload = run_detail_status(sales_order=sales_order) or {}
+        profit_rows = base_payload.get("profit_by_item") or []
+        profit_summary = base_payload.get("profit_summary") or {}
+        fulfillment_rows = base_payload.get("sales_fulfillment_hierarchy") or []
+        po_item_group_summary = base_payload.get("po_item_group_summary") or []
+        order_qty_by_item = {
+            (row.get("item_code") or "").strip(): frappe.utils.flt(row.get("qty"))
+            for row in profit_rows
+            if (row.get("item_code") or "").strip()
         }
-        for row in fulfillment_rows
-        if row.get("delivery_note")
-    ]
 
-    selected_delivery_meta = {}
-    selected_delivery_items = []
-    selected_invoice_details = []
-    selected_qty_by_item = {}
-    selected_profit_summary = profit_summary
-    selected_profit_rows = profit_rows
+        delivery_note_options = [
+            {
+                "delivery_note": row.get("delivery_note") or "",
+                "status": row.get("status") or "",
+                "posting_date": row.get("posting_date") or "",
+                "invoice_count": len(row.get("invoices") or []),
+            }
+            for row in fulfillment_rows
+            if row.get("delivery_note")
+        ]
 
-    if delivery_note:
-        delivery_payload = run_detail_status(
-            action="doc_items",
-            doctype="Delivery Note",
-            docname=delivery_note,
-        ) or {}
-        selected_delivery_meta = delivery_payload.get("meta") or {}
-        selected_delivery_items = delivery_payload.get("items") or []
-        selected_qty_by_item = _aggregate_qty_by_item(selected_delivery_items)
-        selected_profit = _compute_selected_profit(profit_rows, selected_delivery_items)
-        selected_profit_summary = selected_profit.get("summary") or {}
-        selected_profit_rows = selected_profit.get("items") or []
-        selected_invoice_details = _get_selected_invoice_details(fulfillment_rows, delivery_note)
+        selected_delivery_meta = {}
+        selected_delivery_items = []
+        selected_invoice_details = []
+        selected_qty_by_item = {}
+        selected_profit_summary = profit_summary
+        selected_profit_rows = profit_rows
 
-    item_group_map = _get_item_group_map(
-        [row.get("item_code") for row in profit_rows]
-        + [row.get("item_code") for row in selected_profit_rows]
-        + [row.get("item_code") for row in selected_delivery_items]
-    )
-    profit_rows = _attach_item_groups(profit_rows, item_group_map)
-    selected_profit_rows = _attach_item_groups(selected_profit_rows, item_group_map)
-    selected_delivery_items = _attach_item_groups(selected_delivery_items, item_group_map)
+        if delivery_note:
+            delivery_payload = run_detail_status(
+                action="doc_items",
+                doctype="Delivery Note",
+                docname=delivery_note,
+            ) or {}
+            selected_delivery_meta = delivery_payload.get("meta") or {}
+            selected_delivery_items = delivery_payload.get("items") or []
+            selected_qty_by_item = _aggregate_qty_by_item(selected_delivery_items)
+            selected_profit = _compute_selected_profit(profit_rows, selected_delivery_items)
+            selected_profit_summary = selected_profit.get("summary") or {}
+            selected_profit_rows = selected_profit.get("items") or []
+            selected_invoice_details = _get_selected_invoice_details(fulfillment_rows, delivery_note)
 
-    scaled_labour = _scale_labour_rows(
-        base_payload.get("labour_cost_employee_item_wise") or [],
-        selected_qty_by_item,
-        order_qty_by_item,
-    )
-    bom_rows = _flatten_bom_rows(base_payload.get("bom_tree") or [], selected_qty_by_item)
-    related_expenses = _build_related_expenses(
-        selected_profit_summary,
-        scaled_labour.get("summary") or {},
-        po_item_group_summary,
-    )
-    statement_rows = _build_statement_rows(
-        selected_profit_summary,
-        scaled_labour.get("summary") or {},
-        po_item_group_summary,
-    )
-    item_group_summary = _build_item_group_summary(selected_profit_rows)
+        item_group_map = _get_item_group_map(
+            [row.get("item_code") for row in profit_rows]
+            + [row.get("item_code") for row in selected_profit_rows]
+            + [row.get("item_code") for row in selected_delivery_items]
+        )
+        profit_rows = _attach_item_groups(profit_rows, item_group_map)
+        selected_profit_rows = _attach_item_groups(selected_profit_rows, item_group_map)
+        selected_delivery_items = _attach_item_groups(selected_delivery_items, item_group_map)
 
-    return {
-        "sales_order": sales_order,
-        "selected_delivery_note": delivery_note,
-        "delivery_note_options": delivery_note_options,
-        "delivery_note_meta": selected_delivery_meta,
-        "delivery_note_items": selected_delivery_items,
-        "invoice_details": selected_invoice_details,
-        "profit_summary": profit_summary,
-        "profit_by_item": profit_rows,
-        "selected_profit_summary": selected_profit_summary,
-        "selected_profit_by_item": selected_profit_rows,
-        "bom_rows": bom_rows,
-        "material_shortage": base_payload.get("material_shortage") or [],
-        "labour_cost_rows": scaled_labour.get("rows") or [],
-        "labour_cost_summary": scaled_labour.get("summary") or {},
-        "po_item_group_summary": po_item_group_summary,
-        "purchase_flow_rows": base_payload.get("purchase_flow_rows") or [],
-        "sales_fulfillment_hierarchy": fulfillment_rows,
-        "related_expenses": related_expenses,
-        "statement_rows": statement_rows,
-        "item_group_summary": item_group_summary,
-    }
+        scaled_labour = _scale_labour_rows(
+            base_payload.get("labour_cost_employee_item_wise") or [],
+            selected_qty_by_item,
+            order_qty_by_item,
+        )
+        bom_rows = _flatten_bom_rows(base_payload.get("bom_tree") or [], selected_qty_by_item)
+        related_expenses = _build_related_expenses(
+            selected_profit_summary,
+            scaled_labour.get("summary") or {},
+            po_item_group_summary,
+        )
+        statement_rows = _build_statement_rows(
+            selected_profit_summary,
+            scaled_labour.get("summary") or {},
+            po_item_group_summary,
+        )
+        item_group_summary = _build_item_group_summary(selected_profit_rows)
+        hierarchical_statement_rows = _build_hierarchical_statement_rows(
+            selected_profit_rows,
+            bom_rows,
+            scaled_labour.get("rows") or [],
+            po_item_group_summary,
+        )
+
+        return {
+            "sales_order": sales_order,
+            "selected_delivery_note": delivery_note,
+            "delivery_note_options": delivery_note_options,
+            "delivery_note_meta": selected_delivery_meta,
+            "delivery_note_items": selected_delivery_items,
+            "invoice_details": selected_invoice_details,
+            "profit_summary": profit_summary,
+            "profit_by_item": profit_rows,
+            "selected_profit_summary": selected_profit_summary,
+            "selected_profit_by_item": selected_profit_rows,
+            "bom_rows": bom_rows,
+            "material_shortage": base_payload.get("material_shortage") or [],
+            "labour_cost_rows": scaled_labour.get("rows") or [],
+            "labour_cost_summary": scaled_labour.get("summary") or {},
+            "po_item_group_summary": po_item_group_summary,
+            "purchase_flow_rows": base_payload.get("purchase_flow_rows") or [],
+            "sales_fulfillment_hierarchy": fulfillment_rows,
+            "related_expenses": related_expenses,
+            "statement_rows": statement_rows,
+            "item_group_summary": item_group_summary,
+            "hierarchical_statement_rows": hierarchical_statement_rows,
+        }
+    except Exception as error:
+        frappe.log_error(frappe.get_traceback(), "PL by Order API Error")
+        return {
+            "error": str(error),
+        }
 
 
 @frappe.whitelist()
