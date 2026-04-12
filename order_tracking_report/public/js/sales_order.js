@@ -133,6 +133,15 @@ frappe.ui.form.on("Sales Order", {
       frappe.set_route("manage-sales-orders");
     }, __("View"));
 
+    frm.add_custom_button(__("Financials"), () => {
+      frappe.route_options = {
+        sales_order: frm.doc.name,
+        company: frm.doc.company || "",
+        customer: frm.doc.customer || "",
+      };
+      frappe.set_route("finanicals");
+    }, __("View"));
+
     frm.trigger("render_execution_dashboard");
   },
 

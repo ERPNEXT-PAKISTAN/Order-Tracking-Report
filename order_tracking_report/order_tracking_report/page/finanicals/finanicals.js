@@ -63,7 +63,12 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			tab.className = "tab";
 			tab.dataset.tab = "pl-by-order";
 			tab.textContent = "PL by Order";
-			tabs.appendChild(tab);
+			const overviewTab = tabs.querySelector('[data-tab="overview"]');
+			if (overviewTab && overviewTab.nextSibling) {
+				tabs.insertBefore(tab, overviewTab.nextSibling);
+			} else {
+				tabs.appendChild(tab);
+			}
 		}
 
 		if (!root.querySelector("#pl-by-order")) {
@@ -101,6 +106,18 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		const style = document.createElement("style");
 		style.id = "otr-finanicals-local-style";
 		style.textContent = `
+			:root {
+				--otr-pl-ink: #102a43;
+				--otr-pl-muted: #486581;
+				--otr-pl-line: #d9e2ec;
+				--otr-pl-panel: #ffffff;
+				--otr-pl-soft: #f7fbff;
+				--otr-pl-section-bg: linear-gradient(180deg, #fdfefe 0%, #f7fbff 100%);
+				--otr-pl-accent: #0f766e;
+				--otr-pl-accent-soft: #ccfbf1;
+				--otr-pl-blue-soft: #e0f2fe;
+				--otr-pl-total: #effcf6;
+			}
 			.otr-pl-order-shell {
 				display: flex;
 				flex-direction: column;
@@ -108,7 +125,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			}
 			.otr-pl-toolbar {
 				display: grid;
-				grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto auto;
+				grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(170px, 1fr) minmax(170px, 1fr) auto auto;
 				gap: 12px;
 				align-items: end;
 				padding: 14px;
@@ -160,18 +177,61 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				grid-template-columns: 1fr;
 				gap: 16px;
 			}
+			.otr-pl-row-2 {
+				display: grid;
+				grid-template-columns: 1fr 1fr;
+				gap: 16px;
+			}
 			.otr-pl-section {
-				padding: 14px;
-				border-radius: 14px;
-				border: 1px solid #cbd5e1;
-				background: #ffffff;
-				box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+				padding: 16px;
+				border-radius: 16px;
+				border: 1px solid var(--otr-pl-line);
+				background: var(--otr-pl-section-bg);
+				box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+				position: relative;
 			}
 			.otr-pl-section h3 {
 				margin: 0 0 10px;
-				font-size: 15px;
+				padding: 10px 12px;
+				font-size: 16px;
 				font-weight: 800;
-				color: #0f172a;
+				color: var(--otr-pl-ink);
+				background: rgba(255, 255, 255, 0.92);
+				border: 1px solid rgba(217, 226, 236, 0.85);
+				border-radius: 12px;
+				box-shadow: 0 6px 18px rgba(15, 23, 42, 0.07);
+			}
+			.otr-pl-statement-section {
+				background: linear-gradient(180deg, #f8fffe 0%, #f7fbff 100%);
+				border-color: #b6e3df;
+			}
+			.otr-pl-statement-title {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 12px;
+				padding: 10px 12px;
+				margin-bottom: 10px;
+				border: 1px solid #d7eeea;
+				border-radius: 12px;
+				background: rgba(248, 255, 254, 0.94);
+				backdrop-filter: blur(8px);
+				box-shadow: 0 8px 20px rgba(15, 23, 42, 0.07);
+			}
+			.otr-pl-statement-title h3 {
+				margin: 0;
+				font-size: 18px;
+				letter-spacing: 0.01em;
+			}
+			.otr-pl-statement-badge {
+				padding: 6px 10px;
+				border-radius: 999px;
+				background: linear-gradient(135deg, #ccfbf1 0%, #e0f2fe 100%);
+				color: #0f766e;
+				font-size: 11px;
+				font-weight: 800;
+				letter-spacing: 0.05em;
+				text-transform: uppercase;
 			}
 			.otr-pl-empty {
 				padding: 18px;
@@ -183,17 +243,23 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			}
 			.otr-pl-table-wrap {
 				overflow-x: auto;
-				border: 1px solid #e2e8f0;
-				border-radius: 12px;
+				border: 1px solid #dbe7f0;
+				border-radius: 16px;
+				background: #ffffff;
+				box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
 			}
 			.otr-pl-table {
 				width: 100%;
 				border-collapse: collapse;
-				font-size: 13px;
+				font-size: 12px;
+				background: #ffffff;
+			}
+			.otr-pl-statement-section .otr-pl-table thead th {
+				position: static;
 			}
 			.otr-pl-table th {
 				padding: 10px 12px;
-				background: linear-gradient(135deg, #0f172a 0%, #164e63 100%);
+				background: linear-gradient(135deg, #12344d 0%, #155e75 100%);
 				color: #ffffff;
 				text-align: left;
 				font-size: 11px;
@@ -202,8 +268,14 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				text-transform: uppercase;
 			}
 			.otr-pl-table td {
-				padding: 9px 12px;
-				border-top: 1px solid #e2e8f0;
+				padding: 7px 12px;
+				border-top: 1px solid #edf2f7;
+				color: var(--otr-pl-ink);
+				vertical-align: middle;
+				line-height: 1.25;
+			}
+			.otr-pl-table tbody tr:nth-child(even):not(.otr-pl-row-total):not(.otr-pl-row-group-light):not(.otr-pl-row-section) {
+				background: #fbfdff;
 			}
 			.otr-pl-table td.text-right,
 			.otr-pl-table th.text-right {
@@ -234,6 +306,90 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			.otr-pl-table .otr-pl-h-row-expense {
 				background: #ffffff;
 			}
+			.otr-pl-group {
+				border: 1px solid #dbeafe;
+				border-radius: 12px;
+				overflow: hidden;
+				background: #fff;
+			}
+			.otr-pl-group + .otr-pl-group {
+				margin-top: 10px;
+			}
+			.otr-pl-group > summary {
+				list-style: none;
+				cursor: pointer;
+				padding: 10px 12px;
+				font-weight: 800;
+				font-size: 13px;
+				color: #0f172a;
+				background: linear-gradient(135deg, #e0f2fe 0%, #dbeafe 100%);
+				border-bottom: 1px solid #bfdbfe;
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+			}
+			.otr-pl-group > summary::-webkit-details-marker {
+				display: none;
+			}
+			.otr-pl-group-total {
+				font-weight: 900;
+				color: #0f766e;
+			}
+			.otr-pl-table .otr-pl-row-total {
+				background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf9 100%);
+				font-weight: 800;
+				color: #065f46;
+			}
+			.otr-pl-table .otr-pl-row-group-light {
+				background: linear-gradient(135deg, #eff8ff 0%, #f4fbff 100%);
+				font-weight: 700;
+				color: #075985;
+			}
+			.otr-pl-table .otr-pl-row-section {
+				background: linear-gradient(90deg, #dff7f2 0%, #e9f5ff 100%);
+				font-weight: 800;
+				color: #0f4c5c;
+			}
+			.otr-pl-table .otr-pl-row-section td {
+				padding-top: 9px;
+				padding-bottom: 9px;
+			}
+			.otr-pl-table .otr-pl-row-indent td:first-child {
+				padding-left: 28px;
+			}
+			.otr-pl-table .otr-pl-row-detail td:first-child {
+				padding-left: 32px;
+			}
+			.otr-pl-toggle {
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				width: 22px;
+				height: 22px;
+				margin-right: 8px;
+				border: 1px solid #93c5fd;
+				border-radius: 999px;
+				background: #ffffff;
+				color: #1d4ed8;
+				font-size: 14px;
+				font-weight: 900;
+				line-height: 1;
+				cursor: pointer;
+				vertical-align: middle;
+			}
+			.otr-pl-toggle:hover {
+				background: #eff6ff;
+			}
+			.otr-pl-row-hidden {
+				display: none;
+			}
+			.otr-pl-table .otr-pl-cell-dash {
+				color: #9fb3c8;
+			}
+			.otr-pl-table .otr-pl-cell-amount-strong {
+				font-weight: 800;
+				color: #0b6e4f;
+			}
 			.otr-pl-table .otr-pl-h-label {
 				white-space: nowrap;
 			}
@@ -254,9 +410,118 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			.otr-pl-doc-link:hover {
 				text-decoration: underline;
 			}
+			@media print {
+				@page {
+					size: A4 portrait;
+					margin: 10mm;
+				}
+				body {
+					background: #ffffff !important;
+				}
+				body * {
+					-webkit-print-color-adjust: exact !important;
+					print-color-adjust: exact !important;
+				}
+				.otr-pl-toolbar,
+				.otr-pl-status,
+				.btn,
+				.page-head,
+				.page-actions,
+				.layout-side-section,
+				.sidebar,
+				.navbar,
+				footer {
+					display: none !important;
+				}
+				.otr-finanicals-page,
+				.otr-pl-order-shell,
+				.otr-pl-grid,
+				.otr-pl-row-2 {
+					display: block !important;
+					gap: 0 !important;
+				}
+				.otr-pl-card-grid {
+					display: grid !important;
+					grid-template-columns: repeat(3, 1fr) !important;
+					gap: 6mm !important;
+					margin-bottom: 6mm;
+				}
+				.otr-pl-card,
+				.otr-pl-section,
+				.otr-pl-table-wrap {
+					box-shadow: none !important;
+				}
+				.otr-pl-section {
+					margin-bottom: 6mm;
+					padding: 10px !important;
+					background: #ffffff !important;
+					border-color: #cbd5e1 !important;
+					page-break-inside: avoid;
+					break-inside: avoid;
+				}
+				.otr-pl-section h3,
+				.otr-pl-statement-title,
+				.otr-pl-statement-section .otr-pl-table thead th {
+					position: static !important;
+					backdrop-filter: none !important;
+				}
+				.otr-pl-row-hidden {
+					display: table-row !important;
+				}
+				.otr-pl-toggle {
+					display: none !important;
+				}
+				.otr-pl-section h3 {
+					padding: 0 0 6px 0 !important;
+					margin-bottom: 8px !important;
+					border: 0 !important;
+					border-bottom: 1px solid #cbd5e1 !important;
+					border-radius: 0 !important;
+					background: transparent !important;
+					box-shadow: none !important;
+				}
+				.otr-pl-statement-title {
+					padding: 0 0 8px 0 !important;
+					margin-bottom: 8px !important;
+					border: 0 !important;
+					border-bottom: 1px solid #cbd5e1 !important;
+					border-radius: 0 !important;
+					background: transparent !important;
+					box-shadow: none !important;
+				}
+				.otr-pl-statement-badge {
+					border: 1px solid #cbd5e1;
+					background: #f8fafc !important;
+					color: #334155 !important;
+				}
+				.otr-pl-table-wrap {
+					overflow: visible !important;
+					border-radius: 0 !important;
+					border-color: #cbd5e1 !important;
+				}
+				.otr-pl-table {
+					font-size: 10.5px !important;
+				}
+				.otr-pl-table th,
+				.otr-pl-table td {
+					padding: 5px 7px !important;
+				}
+				.otr-pl-table tr,
+				.otr-pl-table td,
+				.otr-pl-table th {
+					page-break-inside: avoid;
+					break-inside: avoid;
+				}
+				.otr-pl-note {
+					margin-bottom: 5mm;
+					background: #ffffff !important;
+					border-color: #cbd5e1 !important;
+				}
+			}
 			@media (max-width: 980px) {
 				.otr-pl-toolbar,
-				.otr-pl-grid {
+				.otr-pl-grid,
+				.otr-pl-row-2 {
 					grid-template-columns: 1fr;
 				}
 			}
@@ -285,6 +550,10 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			<div class="otr-pl-toolbar">
 				<div data-field="sales_order"></div>
 				<div data-field="delivery_note"></div>
+				<div data-field="wastage_pct"></div>
+				<div data-field="stitching_oh_pct"></div>
+				<div data-field="head_office_exp_pct"></div>
+				<div data-field="bank_charges_pct"></div>
 				<button class="btn btn-primary btn-sm" data-action="load-pl-order">${__("Load")}</button>
 				<button class="btn btn-default btn-sm" data-action="reset-pl-order">${__("Reset")}</button>
 			</div>
@@ -309,6 +578,43 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			options: "Delivery Note",
 			value: this.routeOptions.delivery_note || "",
 		});
+
+		this.plControls.wastage_pct = this.makeFloatControl(shell.find('[data-field="wastage_pct"]')[0], {
+			fieldname: "wastage_pct",
+			label: __("Wastage %"),
+			default: this.routeOptions.wastage_pct || 10,
+		});
+
+		this.plControls.stitching_oh_pct = this.makeFloatControl(shell.find('[data-field="stitching_oh_pct"]')[0], {
+			fieldname: "stitching_oh_pct",
+			label: __("Stitching OH %"),
+			default: this.routeOptions.stitching_oh_pct || 60,
+		});
+
+		this.plControls.head_office_exp_pct = this.makeFloatControl(shell.find('[data-field="head_office_exp_pct"]')[0], {
+			fieldname: "head_office_exp_pct",
+			label: __("Head Office Expense %age"),
+			default: this.routeOptions.head_office_exp_pct || 5,
+		});
+
+		this.plControls.bank_charges_pct = this.makeFloatControl(shell.find('[data-field="bank_charges_pct"]')[0], {
+			fieldname: "bank_charges_pct",
+			label: __("Bank Charges %age"),
+			default: this.routeOptions.bank_charges_pct || 3,
+		});
+
+		if (this.plControls.wastage_pct.$input) {
+			this.plControls.wastage_pct.$input.on("change", () => this.rebuildStatementFromCurrent());
+		}
+		if (this.plControls.stitching_oh_pct.$input) {
+			this.plControls.stitching_oh_pct.$input.on("change", () => this.rebuildStatementFromCurrent());
+		}
+		if (this.plControls.head_office_exp_pct.$input) {
+			this.plControls.head_office_exp_pct.$input.on("change", () => this.rebuildStatementFromCurrent());
+		}
+		if (this.plControls.bank_charges_pct.$input) {
+			this.plControls.bank_charges_pct.$input.on("change", () => this.rebuildStatementFromCurrent());
+		}
 
 		shell.find('[data-action="load-pl-order"]').on("click", () => this.loadPlByOrder());
 		shell.find('[data-action="reset-pl-order"]').on("click", () => this.resetPlByOrder());
@@ -336,6 +642,21 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		return control;
 	}
 
+	makeFloatControl(parent, config) {
+		const control = frappe.ui.form.make_control({
+			parent,
+			df: {
+				fieldtype: "Float",
+				fieldname: config.fieldname,
+				label: config.label,
+				default: config.default || 0,
+			},
+			render_input: true,
+		});
+		control.set_value(config.default || 0);
+		return control;
+	}
+
 	getControlValue(control) {
 		if (!control) {
 			return "";
@@ -356,8 +677,28 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 	resetPlByOrder() {
 		this.plControls.sales_order.set_value("");
 		this.plControls.delivery_note.set_value("");
+		this.plControls.wastage_pct.set_value(10);
+		this.plControls.stitching_oh_pct.set_value(60);
+		this.plControls.head_office_exp_pct.set_value(5);
+		this.plControls.bank_charges_pct.set_value(3);
+		this.latestPlData = null;
 		this.$plStatus.text(__("Select a Sales Order or Delivery Note to load PL by Order."));
 		this.renderPlEmptyState();
+	}
+
+	getPercentValue(control) {
+		if (!control) {
+			return 0;
+		}
+		const value = Number(control.get_value ? control.get_value() : 0);
+		return Number.isFinite(value) ? value : 0;
+	}
+
+	rebuildStatementFromCurrent() {
+		if (!this.latestPlData) {
+			return;
+		}
+		this.renderPlByOrder(this.latestPlData);
 	}
 
 	renderPlEmptyState() {
@@ -410,16 +751,20 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 	}
 
 	renderPlByOrder(data) {
+		this.latestPlData = data;
 		const summary = data.selected_profit_summary || data.profit_summary || {};
 		const baseSummary = data.profit_summary || {};
 		const labourSummary = data.labour_cost_summary || {};
 		const deliveryNotes = data.delivery_note_options || [];
 		const invoiceDetails = data.invoice_details || [];
-		const statementRows = data.statement_rows || [];
 		const itemGroupSummary = data.item_group_summary || [];
-		const hierarchicalStatementRows = data.hierarchical_statement_rows || [];
 		const linkedSalesOrders = data.linked_sales_orders || [];
 		const selectedDn = data.selected_delivery_note || "";
+		const wastagePct = this.getPercentValue(this.plControls.wastage_pct);
+		const stitchingOhPct = this.getPercentValue(this.plControls.stitching_oh_pct);
+		const headOfficeExpPct = this.getPercentValue(this.plControls.head_office_exp_pct);
+		const bankChargesPct = this.getPercentValue(this.plControls.bank_charges_pct);
+		const statementModel = this.buildOrderStatementModel(data, { wastagePct, stitchingOhPct, headOfficeExpPct, bankChargesPct });
 		const modeLabel = selectedDn
 			? __("Showing Delivery Note level allocation using Sales Order default BOM costs.")
 			: __("Showing Sales Order level estimated profit and loss.");
@@ -428,23 +773,46 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		this.$plStatus.text(`${__("Sales Order")}: ${salesOrderText}${selectedDn ? ` • ${__("Delivery Note")}: ${selectedDn}` : ""}`);
 
 		const html = `
-			<div class="otr-pl-note">${frappe.utils.escape_html(modeLabel)}</div>
+			<div class="otr-pl-note">${frappe.utils.escape_html(modeLabel)} • ${__("Wastage %")}: ${this.formatPercent(wastagePct)} • ${__("Stitching OH %")}: ${this.formatPercent(stitchingOhPct)} • ${__("Head Office Expense %age")}: ${this.formatPercent(headOfficeExpPct)} • ${__("Bank Charges %age")}: ${this.formatPercent(bankChargesPct)}</div>
 			<div class="otr-pl-card-grid">
 				${this.renderMetricCard(__("Sales Amount"), this.formatCurrency(summary.sales_amount || 0), selectedDn ? __("Selected delivery note") : __("Sales order total"))}
 				${this.renderMetricCard(__("Estimated Material Cost"), this.formatCurrency(summary.estimated_cost || 0), __("From default BOM"))}
 					${this.renderMetricCard(__("Estimated Profit"), this.formatCurrency(summary.estimated_profit || 0), `${this.formatPercent(summary.margin_pct || 0)} ${__("margin")}`)}
 					${this.renderMetricCard(__("Labour Cost"), this.formatCurrency(labourSummary.total_cost || 0), `${this.formatNumber(labourSummary.total_qty || 0)} ${__("qty")}`)}
+					${this.renderMetricCard(__("Wastage Amount"), this.formatCurrency(statementModel.wastageAmount || 0), `${this.formatPercent(wastagePct)} ${__("of raw material")}`)}
+					${this.renderMetricCard(__("Stitching OH Amount"), this.formatCurrency(statementModel.stitchingOhAmount || 0), `${this.formatPercent(stitchingOhPct)} ${__("of CMT labour")}`)}
+					${this.renderMetricCard(__("Head Office Expense"), this.formatCurrency(statementModel.headOfficeExpAmount || 0), `${this.formatPercent(headOfficeExpPct)} ${__("of sales")}`)}
+					${this.renderMetricCard(__("Bank Charges"), this.formatCurrency(statementModel.bankChargesAmount || 0), `${this.formatPercent(bankChargesPct)} ${__("of sales")}`)}
 				${this.renderMetricCard(__("Delivery Notes"), this.formatNumber(deliveryNotes.length), selectedDn ? __("Current selection applied") : __("Linked with this order"))}
 					${this.renderMetricCard(__("Base Order Profit"), this.formatCurrency(baseSummary.estimated_profit || 0), `${this.formatPercent(baseSummary.margin_pct || 0)} ${__("margin")}`)}
 			</div>
 			<div class="otr-pl-grid">
-				<div class="otr-pl-section">
-					<h3>${__("PL Statement by Item Hierarchy")}</h3>
-					${this.renderHierarchicalStatementTable(hierarchicalStatementRows)}
+				<div class="otr-pl-section otr-pl-statement-section">
+					<div class="otr-pl-statement-title">
+						<h3>${__("PL Statement")}</h3>
+						<div class="otr-pl-statement-badge">${__("Order View")}</div>
+					</div>
+					${this.renderGroupedStatementTable(statementModel, {
+						wastagePct,
+						stitchingOhPct,
+						headOfficeExpPct,
+						bankChargesPct,
+					})}
 				</div>
-				<div class="otr-pl-section">
-					<h3>${__("Profit and Loss Summary")}</h3>
-					${this.renderStatementTable(statementRows)}
+				<div class="otr-pl-row-2">
+					<div class="otr-pl-section">
+						<h3>${__("Final Summary")}</h3>
+						${this.renderFinalSummaryTable(statementModel)}
+					</div>
+					<div class="otr-pl-section">
+						<h3>${__("Profit and Loss Summary")}</h3>
+						${this.renderProfitLossSummaryFromModel(statementModel, {
+							wastagePct,
+							stitchingOhPct,
+							headOfficeExpPct,
+							bankChargesPct,
+						})}
+					</div>
 				</div>
 				<div class="otr-pl-section">
 					<h3>${__("Item Group Wise Summary")}</h3>
@@ -458,17 +826,15 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 					<h3>${__("Related Expenses")}</h3>
 					${this.renderRelatedExpensesTable(data.related_expenses || [])}
 				</div>
-				<div class="otr-pl-section">
-					<h3>${selectedDn ? __("Delivery Note Items") : __("Linked Delivery Notes")}</h3>
-					${selectedDn ? this.renderDeliveryNoteItemTable(data.delivery_note_items || []) : this.renderDeliveryNoteOptionsTable(deliveryNotes)}
-				</div>
+				<div class="otr-pl-row-2">
+					<div class="otr-pl-section">
+						<h3>${selectedDn ? __("Delivery Note Items") : __("Linked Delivery Notes")}</h3>
+						${selectedDn ? this.renderDeliveryNoteItemTable(data.delivery_note_items || []) : this.renderDeliveryNoteOptionsTable(deliveryNotes)}
+					</div>
 					<div class="otr-pl-section">
 						<h3>${selectedDn ? __("Linked Sales Invoices") : __("Procurement by Item Group")}</h3>
 						${selectedDn ? this.renderInvoiceDetails(invoiceDetails) : this.renderPoItemGroupTable(data.po_item_group_summary || [])}
 					</div>
-				<div class="otr-pl-section">
-					<h3>${__("BOM and Raw Materials")}</h3>
-					${this.renderBomTable(data.bom_rows || [])}
 				</div>
 				<div class="otr-pl-section">
 					<h3>${__("Labour Cost Detail")}</h3>
@@ -478,6 +844,322 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		`;
 
 		this.$plContent.html(html);
+		this.bindPlStatementInteractions();
+	}
+
+	bindPlStatementInteractions() {
+		this.$plContent.find(".otr-pl-toggle").off("click").on("click", (event) => {
+			event.preventDefault();
+			const $button = $(event.currentTarget);
+			const groupKey = $button.attr("data-group-key");
+			if (!groupKey) {
+				return;
+			}
+			const isExpanded = $button.attr("aria-expanded") === "true";
+			const nextExpanded = !isExpanded;
+			$button.attr("aria-expanded", nextExpanded ? "true" : "false");
+			$button.find(".otr-pl-toggle-icon").text(nextExpanded ? "-" : "+");
+			this.$plContent.find(`[data-parent-group="${groupKey}"]`).toggleClass("otr-pl-row-hidden", !nextExpanded);
+		});
+	}
+
+	buildOrderStatementModel(data, options = {}) {
+		const wastagePct = Number(options.wastagePct || 0);
+		const stitchingOhPct = Number(options.stitchingOhPct || 0);
+		const headOfficeExpPct = Number(options.headOfficeExpPct || 0);
+		const bankChargesPct = Number(options.bankChargesPct || 0);
+		const selectedProfitRows = data.selected_profit_by_item || [];
+		const bomRows = data.bom_rows || [];
+		const labourSummary = data.labour_cost_summary || {};
+
+		const salesRows = selectedProfitRows.map((row) => {
+			const qty = Number(row.qty || 0);
+			const amount = Number(row.sales_amount || 0);
+			return {
+				label: row.item_code || "-",
+				qty,
+				rate: qty ? amount / qty : 0,
+				amount,
+			};
+		});
+		const totalSales = salesRows.reduce((sum, row) => sum + row.amount, 0);
+
+		const materialBasis = {};
+		for (const row of bomRows) {
+			const key = (row.material_item_code || "-").trim() || "-";
+			const groupLabel = (row.material_item_group || "Unclassified").trim() || "Unclassified";
+			const qty = Number(row.required_qty || 0);
+			const rate = Number(row.last_purchase_rate || 0);
+			if (!materialBasis[key]) {
+				materialBasis[key] = { label: key, group: groupLabel, qty: 0, rate: rate || 0 };
+			}
+			materialBasis[key].qty += qty;
+		}
+		const materialRows = Object.values(materialBasis).map((row) => {
+			const amount = row.qty * (row.rate || 0);
+			return {
+				label: row.label,
+				group: row.group,
+				qty: row.qty,
+				rate: row.rate || 0,
+				amount,
+			};
+		});
+		const totalMaterialCost = materialRows.reduce((sum, row) => sum + row.amount, 0);
+
+		const materialGroups = [];
+		const materialGroupMap = {};
+		for (const row of materialRows) {
+			const group = row.group || "Unclassified";
+			if (!materialGroupMap[group]) {
+				materialGroupMap[group] = [];
+			}
+			materialGroupMap[group].push(row);
+		}
+		Object.keys(materialGroupMap).sort().forEach((group) => {
+			const rows = materialGroupMap[group];
+			const qty = rows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
+			const amount = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+			materialGroups.push({
+				key: frappe.scrub(group || "unclassified"),
+				label: `${group}`,
+				qty,
+				amount,
+				items: rows.sort((a, b) => String(a.label || "").localeCompare(String(b.label || ""))),
+			});
+		});
+
+		const wastageAmount = totalMaterialCost * (wastagePct / 100);
+		const cmtLabourAmount = Number(labourSummary.total_cost || 0);
+		const stitchingOhAmount = cmtLabourAmount * (stitchingOhPct / 100);
+		const headOfficeExpAmount = totalSales * (headOfficeExpPct / 100);
+		const bankChargesAmount = totalSales * (bankChargesPct / 100);
+		const totalExpense = totalMaterialCost + wastageAmount + cmtLabourAmount + stitchingOhAmount + headOfficeExpAmount + bankChargesAmount;
+		const netProfit = totalSales - totalExpense;
+
+		return {
+			salesRows,
+			materialGroups,
+			totalSales,
+			totalMaterialCost,
+			wastageAmount,
+			cmtLabourAmount,
+			stitchingOhAmount,
+			headOfficeExpAmount,
+			bankChargesAmount,
+			totalExpense,
+			netProfit,
+		};
+	}
+
+	renderGroupedStatementTable(model, percentages = {}) {
+		const overheadRows = [
+			{ label: __("Wastage"), percentage: percentages.wastagePct || 0, amount: model.wastageAmount },
+			{ label: __("Stitching OH %age"), percentage: percentages.stitchingOhPct || 0, amount: model.stitchingOhAmount },
+			{ label: __("Head Office Expense %age"), percentage: percentages.headOfficeExpPct || 0, amount: model.headOfficeExpAmount },
+			{ label: __("Bank Charges %age"), percentage: percentages.bankChargesPct || 0, amount: model.bankChargesAmount },
+		];
+		const totalOverhead = overheadRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+
+		const rows = [];
+		const dashCell = `<span class="otr-pl-cell-dash">-</span>`;
+		const sectionRow = (label) => `
+			<tr class="otr-pl-row-section">
+				<td><strong>${frappe.utils.escape_html(label)}</strong></td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right">${dashCell}</td>
+			</tr>
+		`;
+
+		rows.push(sectionRow(__("Sales Items")));
+		for (const row of model.salesRows || []) {
+			rows.push(`
+				<tr class="otr-pl-row-detail">
+					<td>${frappe.utils.escape_html(row.label || "-")}</td>
+					<td class="text-right">${row.qty ? this.formatNumber(row.qty) : "-"}</td>
+					<td class="text-right">${row.rate ? this.formatRate(row.rate) : "-"}</td>
+					<td class="text-right">${this.formatCurrency(row.amount || 0)}</td>
+					<td class="text-right">${dashCell}</td>
+				</tr>
+			`);
+		}
+		rows.push(`
+			<tr class="otr-pl-row-total">
+				<td>${__("Total Sales")}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right otr-pl-cell-amount-strong">${this.formatCurrency(model.totalSales)}</td>
+				<td class="text-right">${this.formatCurrency(model.totalSales)}</td>
+			</tr>
+		`);
+
+		rows.push(sectionRow(__("Raw Materials")));
+		for (const group of model.materialGroups || []) {
+			rows.push(`
+				<tr class="otr-pl-row-group-light">
+					<td><button type="button" class="otr-pl-toggle" data-group-key="${frappe.utils.escape_html(group.key)}" aria-expanded="false"><span class="otr-pl-toggle-icon">+</span></button><strong>${frappe.utils.escape_html(group.label || "-")}</strong></td>
+					<td class="text-right">${group.qty ? this.formatNumber(group.qty) : "-"}</td>
+					<td class="text-right">${dashCell}</td>
+					<td class="text-right otr-pl-cell-amount-strong">${this.formatCurrency(group.amount || 0)}</td>
+					<td class="text-right">${dashCell}</td>
+				</tr>
+			`);
+			for (const item of group.items || []) {
+				rows.push(`
+					<tr class="otr-pl-row-detail otr-pl-row-hidden" data-parent-group="${frappe.utils.escape_html(group.key)}">
+						<td>${frappe.utils.escape_html(item.label || "-")}</td>
+						<td class="text-right">${item.qty ? this.formatNumber(item.qty) : "-"}</td>
+						<td class="text-right">${item.rate ? this.formatRate(item.rate) : "-"}</td>
+						<td class="text-right">${this.formatCurrency(item.amount || 0)}</td>
+						<td class="text-right">${dashCell}</td>
+					</tr>
+				`);
+			}
+		}
+		rows.push(`
+			<tr class="otr-pl-row-total">
+				<td>${__("Total Raw Material")}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right otr-pl-cell-amount-strong">${this.formatCurrency(model.totalMaterialCost)}</td>
+				<td class="text-right">${this.formatCurrency(model.totalMaterialCost)}</td>
+			</tr>
+		`);
+
+		rows.push(sectionRow(__("Expenses")));
+		rows.push(`
+			<tr class="otr-pl-row-indent">
+				<td>${__("CMT Labour Cost")}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right">${this.formatCurrency(model.cmtLabourAmount)}</td>
+				<td class="text-right">${dashCell}</td>
+			</tr>
+		`);
+
+		rows.push(sectionRow(__("Estimated Overhead")));
+		for (const row of overheadRows) {
+			rows.push(`
+				<tr class="otr-pl-row-indent">
+					<td>${frappe.utils.escape_html(`${row.label || "-"}${row.percentage ? ` (${this.formatPercent(row.percentage)})` : ""}`)}</td>
+					<td class="text-right">${dashCell}</td>
+					<td class="text-right">${dashCell}</td>
+					<td class="text-right">${this.formatCurrency(row.amount || 0)}</td>
+					<td class="text-right">${dashCell}</td>
+				</tr>
+			`);
+		}
+		rows.push(`
+			<tr class="otr-pl-row-total">
+				<td>${__("Total Estimated Overhead")}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right otr-pl-cell-amount-strong">${this.formatCurrency(totalOverhead)}</td>
+				<td class="text-right">${this.formatCurrency(totalOverhead)}</td>
+			</tr>
+		`);
+
+		rows.push(sectionRow(__("Final Summary")));
+		rows.push(`
+			<tr class="otr-pl-row-indent">
+				<td>${__("Sales Less Total Expense")}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right">${this.formatCurrency(model.totalExpense)}</td>
+				<td class="text-right">${this.formatCurrency(model.totalSales - model.totalExpense)}</td>
+			</tr>
+		`);
+		rows.push(`
+			<tr class="otr-pl-row-indent">
+				<td>${__("Grand Total Expense")}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right">${this.formatCurrency(model.totalExpense)}</td>
+				<td class="text-right">${dashCell}</td>
+			</tr>
+		`);
+		rows.push(`
+			<tr class="otr-pl-row-total">
+				<td>${__("Net Profit")}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right otr-pl-cell-amount-strong">${this.formatCurrency(model.netProfit)}</td>
+				<td class="text-right">${this.formatCurrency(model.netProfit)}</td>
+			</tr>
+		`);
+
+		return this.wrapTable(`
+			<thead>
+				<tr>
+					<th>${__("Particular")}</th>
+					<th class="text-right">${__("Qty")}</th>
+					<th class="text-right">${__("Price/Rate")}</th>
+					<th class="text-right">${__("Amount")}</th>
+					<th class="text-right">${__("Total")}</th>
+				</tr>
+			</thead>
+			<tbody>${rows.join("")}</tbody>
+		`);
+	}
+
+	renderStatementLineTable(rows, options = {}) {
+		const title = options.title || "";
+		const totalLabel = options.totalLabel || __("Total");
+		const totalAmount = Number(options.totalAmount || 0);
+		const body = (rows || []).map((row) => `
+			<tr class="${row.isGroup ? "otr-pl-row-group-light" : ""}">
+				<td>${row.isGroup ? `<strong>${frappe.utils.escape_html(row.label || "-")}</strong>` : frappe.utils.escape_html(row.label || "-")}</td>
+				<td class="text-right">${row.qty ? this.formatNumber(row.qty) : "-"}</td>
+				<td class="text-right">${row.rate ? this.formatRate(row.rate) : "-"}</td>
+				<td class="text-right">${this.formatCurrency(row.amount || 0)}</td>
+				<td class="text-right">-</td>
+			</tr>
+		`).join("");
+
+		const table = this.wrapTable(`
+			<thead><tr><th>${__("Particular")}</th><th class="text-right">${__("Qty")}</th><th class="text-right">${__("Price/Rate")}</th><th class="text-right">${__("Amount")}</th><th class="text-right">${__("Total")}</th></tr></thead>
+			<tbody>
+				${body}
+				<tr class="otr-pl-row-total"><td>${frappe.utils.escape_html(totalLabel)}</td><td class="text-right">-</td><td class="text-right">-</td><td class="text-right">${this.formatCurrency(totalAmount)}</td><td class="text-right">${this.formatCurrency(totalAmount)}</td></tr>
+			</tbody>
+		`);
+		return `<details class="otr-pl-group" open><summary><span>${frappe.utils.escape_html(title)}</span><span class="otr-pl-group-total">${this.formatCurrency(totalAmount)}</span></summary>${table}</details>`;
+	}
+
+	renderOverheadTable(rows, options = {}) {
+		const title = options.title || "";
+		const totalLabel = options.totalLabel || __("Total");
+		const totalAmount = Number(options.totalAmount || 0);
+		const body = (rows || []).map((row) => `
+			<tr>
+				<td>${frappe.utils.escape_html(row.label || "-")}</td>
+				<td class="text-right">${row.percentage ? this.formatPercent(row.percentage) : "-"}</td>
+				<td class="text-right">${this.formatCurrency(row.amount || 0)}</td>
+				<td class="text-right">-</td>
+			</tr>
+		`).join("");
+
+		const table = this.wrapTable(`
+			<thead><tr><th>${__("Particular")}</th><th class="text-right">${__("Percentage")}</th><th class="text-right">${__("Amount")}</th><th class="text-right">${__("Total")}</th></tr></thead>
+			<tbody>
+				${body}
+				<tr class="otr-pl-row-total"><td>${frappe.utils.escape_html(totalLabel)}</td><td class="text-right">-</td><td class="text-right">${this.formatCurrency(totalAmount)}</td><td class="text-right">${this.formatCurrency(totalAmount)}</td></tr>
+			</tbody>
+		`);
+		return `<details class="otr-pl-group" open><summary><span>${frappe.utils.escape_html(title)}</span><span class="otr-pl-group-total">${this.formatCurrency(totalAmount)}</span></summary>${table}</details>`;
+	}
+
+	renderFinalSummaryTable(model) {
+		return this.wrapTable(`
+			<thead><tr><th>${__("Particular")}</th><th class="text-right">${__("Amount")}</th><th class="text-right">${__("Total")}</th></tr></thead>
+			<tbody>
+				<tr><td>${__("Total Sales")}</td><td class="text-right">${this.formatCurrency(model.totalSales)}</td><td class="text-right">${this.formatCurrency(model.totalSales)}</td></tr>
+				<tr><td>${__("Less: Total Expense")}</td><td class="text-right">${this.formatCurrency(model.totalExpense)}</td><td class="text-right">${this.formatCurrency(model.totalSales - model.totalExpense)}</td></tr>
+				<tr class="otr-pl-row-total"><td>${__("Net Profit")}</td><td class="text-right">${this.formatCurrency(model.netProfit)}</td><td class="text-right">${this.formatCurrency(model.netProfit)}</td></tr>
+			</tbody>
+		`);
 	}
 
 	renderMetricCard(label, value, sub) {
@@ -512,21 +1194,42 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		`);
 	}
 
-		renderStatementTable(rows) {
-			if (!rows.length) {
-				return `<div class="otr-pl-empty">${__("No statement rows found.")}</div>`;
+	renderProfitLossSummaryFromModel(model, percentages = {}) {
+		const totalOverhead = Number(model.wastageAmount || 0)
+			+ Number(model.stitchingOhAmount || 0)
+			+ Number(model.headOfficeExpAmount || 0)
+			+ Number(model.bankChargesAmount || 0);
+
+		const rows = [
+			{ type: "section", label: __("Sales Items") },
+			{ label: __("Total Sales"), amount: model.totalSales },
+			{ type: "section", label: __("Raw Materials") },
+			{ label: __("Total Raw Material"), amount: model.totalMaterialCost },
+			{ type: "section", label: __("Expenses") },
+			{ label: __("CMT Labour Cost"), amount: model.cmtLabourAmount },
+			{ type: "section", label: __("Estimated Overhead") },
+			{ label: __("Wastage ({0})", [this.formatPercent(percentages.wastagePct || 0)]), amount: model.wastageAmount },
+			{ label: __("Stitching OH %age ({0})", [this.formatPercent(percentages.stitchingOhPct || 0)]), amount: model.stitchingOhAmount },
+			{ label: __("Head Office Expense %age ({0})", [this.formatPercent(percentages.headOfficeExpPct || 0)]), amount: model.headOfficeExpAmount },
+			{ label: __("Bank Charges %age ({0})", [this.formatPercent(percentages.bankChargesPct || 0)]), amount: model.bankChargesAmount },
+			{ label: __("Total Estimated Overhead"), amount: totalOverhead, total: 1 },
+			{ type: "section", label: __("Final Summary") },
+			{ label: __("Grand Total Expense"), amount: model.totalExpense, total: 1 },
+			{ label: __("Net Profit"), amount: model.netProfit, total: 1 },
+		];
+
+		const body = rows.map((row) => {
+			if (row.type === "section") {
+				return `<tr class="otr-pl-row-section"><td><strong>${frappe.utils.escape_html(row.label || "-")}</strong></td><td class="text-right"><span class="otr-pl-cell-dash">-</span></td></tr>`;
 			}
-			const body = rows.map((row) => `
-				<tr>
-					<td>${frappe.utils.escape_html(row.label || "-")}</td>
-					<td class="text-right">${this.formatCurrency(row.amount || 0)}</td>
-				</tr>
-			`).join("");
-			return this.wrapTable(`
-				<thead><tr><th>${__("Statement Row")}</th><th class="text-right">${__("Amount")}</th></tr></thead>
-				<tbody>${body}</tbody>
-			`);
-		}
+			return `<tr class="${row.total ? "otr-pl-row-total" : "otr-pl-row-indent"}"><td>${frappe.utils.escape_html(row.label || "-")}</td><td class="text-right ${row.total ? "otr-pl-cell-amount-strong" : ""}">${this.formatCurrency(row.amount || 0)}</td></tr>`;
+		}).join("");
+
+		return this.wrapTable(`
+			<thead><tr><th>${__("Statement Head")}</th><th class="text-right">${__("Amount")}</th></tr></thead>
+			<tbody>${body}</tbody>
+		`);
+	}
 
 		renderHierarchicalStatementTable(rows) {
 			if (!rows.length) {
@@ -691,9 +1394,8 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 	}
 
 	renderLabourTable(rows, summary) {
-		const summaryLine = `<div class="otr-pl-note">${__("Total Qty")}: ${this.formatNumber(summary.total_qty || 0)} • ${__("Total Cost")}: ${this.formatCurrency(summary.total_cost || 0)}</div>`;
 		if (!rows.length) {
-			return `${summaryLine}<div class="otr-pl-empty">${__("No labour rows found.")}</div>`;
+			return `<div class="otr-pl-empty">${__("No labour rows found.")}</div>`;
 		}
 		const body = rows.map((row) => `
 			<tr>
@@ -701,14 +1403,17 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				<td>${frappe.utils.escape_html(row.product || "-")}</td>
 				<td>${frappe.utils.escape_html(row.process_type || "-")}</td>
 				<td class="text-right">${this.formatNumber(row.qty || 0)}</td>
-				<td class="text-right">${this.formatCurrency(row.labour_cost || 0)}</td>
 				<td class="text-right">${this.formatCurrency(row.rate || 0)}</td>
+				<td class="text-right">${this.formatCurrency(row.labour_cost || 0)}</td>
 			</tr>
 		`).join("");
-		return `${summaryLine}${this.wrapTable(`
-			<thead><tr><th>${__("Employee")}</th><th>${__("Item")}</th><th>${__("Process")}</th><th class="text-right">${__("Qty")}</th><th class="text-right">${__("Labour Cost")}</th><th class="text-right">${__("Rate")}</th></tr></thead>
-			<tbody>${body}</tbody>
-		`)}`;
+		return this.wrapTable(`
+			<thead><tr><th>${__("Employee")}</th><th>${__("Item")}</th><th>${__("Process")}</th><th class="text-right">${__("Qty")}</th><th class="text-right">${__("Rate")}</th><th class="text-right">${__("Labour Cost")}</th></tr></thead>
+			<tbody>
+				${body}
+				<tr class="otr-pl-row-total"><td>${__("Total")}</td><td><span class="otr-pl-cell-dash">-</span></td><td><span class="otr-pl-cell-dash">-</span></td><td class="text-right">${this.formatNumber(summary.total_qty || 0)}</td><td class="text-right"><span class="otr-pl-cell-dash">-</span></td><td class="text-right">${this.formatCurrency(summary.total_cost || 0)}</td></tr>
+			</tbody>
+		`);
 	}
 
 	renderDocLink(doctype, name) {
@@ -730,6 +1435,14 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 
 	formatCurrency(value) {
 		return `Rs ${this.formatNumber(value || 0)}`;
+	}
+
+	formatRate(value) {
+		const number = Number(value || 0);
+		if (!Number.isFinite(number)) {
+			return "Rs 0.0";
+		}
+		return `Rs ${number.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`;
 	}
 
 	formatPercent(value) {

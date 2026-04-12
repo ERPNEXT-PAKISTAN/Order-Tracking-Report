@@ -142,6 +142,38 @@ def _flatten_bom_rows(tree, selected_qty_by_item=None):
     return rows
 
 
+def _get_last_purchase_rate_map(item_codes, company=None):
+    clean_codes = sorted({(code or "").strip() for code in item_codes or [] if (code or "").strip()})
+    if not clean_codes:
+        return {}
+
+    conditions = ["po.docstatus = 1", "poi.item_code IN %(item_codes)s"]
+    values = {"item_codes": tuple(clean_codes)}
+    if company:
+        conditions.append("po.company = %(company)s")
+        values["company"] = company
+
+    rows = frappe.db.sql(
+        """
+        SELECT poi.item_code, poi.rate
+        FROM `tabPurchase Order Item` poi
+        JOIN `tabPurchase Order` po ON po.name = poi.parent
+        WHERE {where_clause}
+        ORDER BY poi.item_code ASC, po.transaction_date DESC, poi.modified DESC
+        """.format(where_clause=" AND ".join(conditions)),
+        values=values,
+        as_dict=True,
+    )
+
+    out = {}
+    for row in rows:
+        item_code = (row.get("item_code") or "").strip()
+        if not item_code or item_code in out:
+            continue
+        out[item_code] = frappe.utils.flt(row.get("rate"))
+    return out
+
+
 def _compute_selected_profit(order_profit_rows, selected_items):
     lookup = {}
     for row in order_profit_rows or []:
@@ -1027,6 +1059,13 @@ def get_sales_order_pl_by_order(sales_order=None, delivery_note=None):
             order_qty_by_item,
         )
         bom_rows = _flatten_bom_rows(base_payload.get("bom_tree") or [], selected_qty_by_item)
+        material_codes = [(row.get("material_item_code") or "").strip() for row in bom_rows]
+        material_group_map = _get_item_group_map(material_codes)
+        material_rate_map = _get_last_purchase_rate_map(material_codes, company=(base_payload.get("company") or "").strip())
+        for row in bom_rows:
+            material_code = (row.get("material_item_code") or "").strip()
+            row["material_item_group"] = material_group_map.get(material_code, "Unclassified") or "Unclassified"
+            row["last_purchase_rate"] = frappe.utils.flt(material_rate_map.get(material_code))
         related_expenses = _build_related_expenses(
             selected_profit_summary,
             scaled_labour.get("summary") or {},
