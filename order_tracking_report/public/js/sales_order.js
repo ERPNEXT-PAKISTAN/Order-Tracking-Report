@@ -4892,8 +4892,8 @@ function buildDashboard(frm, data){
     `, false)}
 
     ${sectionBlock('purchase', 'Purchase Order Section', 'linear-gradient(90deg,#7c3aed,#9333ea)', `
-      ${card("PO Analytics (From PO Tab)", "Item Group-Wise PO Status", `${poAnalyticsOverviewCard((data.custom_po_analytics || {}).overview || {})}${poItemGroupTable((data.custom_po_analytics || {}).item_group_rows || [])}`)}
       ${card("Material Shortage & Purchase Suggestion", "Grouped by Item Group with PO and PR planning progress", materialShortageTable(data.material_shortage || []))}
+      ${card("PO Analytics (From PO Tab)", "Item Group-Wise PO Status", `${poAnalyticsOverviewCard((data.custom_po_analytics || {}).overview || {})}${poItemGroupTable((data.custom_po_analytics || {}).item_group_rows || [])}`)}
       ${card("PO-Wise status Report", "Collapsed by Supplier", poStatusDetailTable((data.custom_po_analytics || {}).po_status_rows || []))}
       ${card("Purchase Flow Tracker", "PO + Purchase Receipt + Purchase Invoice in one row with PO cost", purchaseFlowTable(data.purchase_flow_rows || []))}
     `, false)}
