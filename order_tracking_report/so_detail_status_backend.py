@@ -2460,9 +2460,9 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                 "SELECT DISTINCT poi.name AS po_item, poi.item_code, po.name, po.status "
                 "FROM `tabPurchase Order Item` poi "
                 "JOIN `tabPurchase Order` po ON po.name = poi.parent "
-                "WHERE po.docstatus != 2 AND poi.sales_order = %(so)s AND poi.item_code IN %(items)s "
+                "WHERE po.docstatus != 2 AND poi.sales_order = %(so)s "
                 "ORDER BY po.modified DESC LIMIT 4000",
-                {"so": so, "items": tuple(item_codes)}
+                {"so": so}
             )
 
             # Fallback source: Item PO table rows on this Sales Order (custom_po_item),
@@ -2476,9 +2476,9 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                     "ON poi.parent = po.name AND poi.item_code = ip.item "
                     "WHERE po.docstatus != 2 AND ip.parenttype = 'Sales Order' "
                     "AND ip.parentfield = 'custom_po_item' AND ip.parent = %(so)s "
-                    "AND IFNULL(ip.item, '') != '' AND ip.item IN %(items)s "
+                    "AND IFNULL(ip.item, '') != '' "
                     "ORDER BY po.modified DESC LIMIT 4000",
-                    {"so": so, "items": tuple(item_codes)}
+                    {"so": so}
                 )
             )
 
@@ -2508,14 +2508,14 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
         po_names = uniq_list(po_names)
 
         pr_rows = []
-        if po_names and item_codes:
+        if po_names:
             pr_rows = safe_sql(
                 "SELECT DISTINCT pr.name, pr.status, pr.posting_date, pri.item_code, pri.purchase_order_item "
                 "FROM `tabPurchase Receipt` pr "
                 "JOIN `tabPurchase Receipt Item` pri ON pri.parent = pr.name "
-                "WHERE pr.docstatus != 2 AND pri.purchase_order IN %(po)s AND pri.item_code IN %(items)s "
+                "WHERE pr.docstatus != 2 AND pri.purchase_order IN %(po)s "
                 "ORDER BY pr.posting_date DESC, pr.modified DESC LIMIT 4000",
-                {"po": tuple(po_names), "items": tuple(item_codes)}
+                {"po": tuple(po_names)}
             )
 
         pr_names = []
@@ -2547,15 +2547,15 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                     {"po_items": tuple(po_item_names)}
                 )
             )
-        if pr_names and item_codes:
+        if pr_names:
             pi_rows.extend(
                 safe_sql(
                     "SELECT DISTINCT pi.name, pi.status, pi.posting_date, pii.item_code, '' AS po_detail "
                     "FROM `tabPurchase Invoice` pi "
                     "JOIN `tabPurchase Invoice Item` pii ON pii.parent = pi.name "
-                    "WHERE pi.docstatus != 2 AND pii.purchase_receipt IN %(pr)s AND pii.item_code IN %(items)s "
+                    "WHERE pi.docstatus != 2 AND pii.purchase_receipt IN %(pr)s "
                     "ORDER BY pi.posting_date DESC, pi.modified DESC LIMIT 4000",
-                    {"pr": tuple(pr_names), "items": tuple(item_codes)}
+                    {"pr": tuple(pr_names)}
                 )
             )
 
