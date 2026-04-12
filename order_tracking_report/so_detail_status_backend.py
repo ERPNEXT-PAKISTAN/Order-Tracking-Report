@@ -2432,6 +2432,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
         po_item_names = []
 
         if item_codes:
+            # Primary source: PO Items linked by Sales Order on child rows.
             po_item_rows = safe_sql(
                 "SELECT DISTINCT poi.name AS po_item, poi.item_code, po.name, po.status "
                 "FROM `tabPurchase Order Item` poi "
@@ -2441,9 +2442,31 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                 {"so": so, "items": tuple(item_codes)}
             )
 
+            # Fallback source: Item PO table rows on this Sales Order (custom_po_item),
+            # useful when draft/submitted POs exist but PO Item.sales_order is not populated.
+            po_item_rows.extend(
+                safe_sql(
+                    "SELECT DISTINCT poi.name AS po_item, ip.item AS item_code, po.name, po.status "
+                    "FROM `tabItem PO` ip "
+                    "JOIN `tabPurchase Order` po ON po.name = ip.purchase_order "
+                    "LEFT JOIN `tabPurchase Order Item` poi "
+                    "ON poi.parent = po.name AND poi.item_code = ip.item "
+                    "WHERE po.docstatus != 2 AND ip.parenttype = 'Sales Order' "
+                    "AND ip.parentfield = 'custom_po_item' AND ip.parent = %(so)s "
+                    "AND IFNULL(ip.item, '') != '' AND ip.item IN %(items)s "
+                    "ORDER BY po.modified DESC LIMIT 4000",
+                    {"so": so, "items": tuple(item_codes)}
+                )
+            )
+
+        seen_po_item_link = {}
         for row in po_item_rows:
             po_item = row.get("po_item") or ""
             item_code = row.get("item_code") or ""
+            link_key = (row.get("name") or "") + "::" + item_code
+            if not item_code or not row.get("name") or link_key in seen_po_item_link:
+                continue
+            seen_po_item_link[link_key] = 1
             if po_item and item_code:
                 po_item_to_item[po_item] = item_code
                 po_item_names.append(po_item)
