@@ -1269,7 +1269,7 @@ def create_po_from_sales_order_po_tab(source_name=None, row_names=None):
     for item in frappe.get_all(
         "Item",
         filters={"name": ["in", item_codes]},
-        fields=["name", "item_name", "description", "stock_uom", "purchase_uom"],
+        fields=["name", "item_name", "description", "stock_uom", "purchase_uom", "has_variants"],
     ):
         item_map[item.name] = item
 
@@ -1298,6 +1298,12 @@ def create_po_from_sales_order_po_tab(source_name=None, row_names=None):
             item = item_map.get(row.item)
             if not item:
                 frappe.throw("Item not found: " + str(row.item))
+            if frappe.utils.cint(item.get("has_variants")):
+                frappe.throw(
+                    "Item "
+                    + str(row.item)
+                    + " is a template, please select one of its variants"
+                )
 
             stock_uom = item.get("stock_uom")
             purchase_uom = item.get("purchase_uom") or stock_uom

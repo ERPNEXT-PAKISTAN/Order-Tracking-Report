@@ -2252,6 +2252,7 @@ function open_po_item_data_entry(frm, prefill) {
 
   let items_data = [];
   let item_map = {};
+  const template_item_cache = {};
   let last_item_code = "";
   const allowedItemGroups = Array.from(new Set(
     (Array.isArray(prefill && prefill.allowed_item_groups) ? prefill.allowed_item_groups : [])
@@ -2381,11 +2382,11 @@ function open_po_item_data_entry(frm, prefill) {
       item_group = "";
       dialog.set_value("item_group", "");
     }
-    const filters = { disabled: 0, is_purchase_item: 1 };
+    const filters = { disabled: 0, is_purchase_item: 1, has_variants: 0 };
     if (item_group) filters.item_group = item_group;
     const r = await frappe.call({
       method: "frappe.client.get_list",
-      args: { doctype: "Item", fields: ["name", "item_name", "description", "last_purchase_rate"], filters, order_by: "name asc", limit_page_length: 500 },
+      args: { doctype: "Item", fields: ["name", "item_name", "description", "last_purchase_rate", "has_variants"], filters, order_by: "name asc", limit_page_length: 500 },
     });
     const rows = (r && r.message) ? r.message : [];
     item_map = {};
@@ -2399,6 +2400,25 @@ function open_po_item_data_entry(frm, prefill) {
         dialog.set_value("item_code", rows[0].name);
       }
     }
+  }
+
+  async function is_template_item(item_code) {
+    const code = String(item_code || "").trim();
+    if (!code) return false;
+    if (Object.prototype.hasOwnProperty.call(template_item_cache, code)) {
+      return template_item_cache[code];
+    }
+
+    if (item_map[code] && typeof item_map[code].has_variants !== "undefined") {
+      const fromMap = cint(item_map[code].has_variants) === 1;
+      template_item_cache[code] = fromMap;
+      return fromMap;
+    }
+
+    const r = await frappe.db.get_value("Item", code, "has_variants");
+    const fromDb = cint(r && r.message && r.message.has_variants) === 1;
+    template_item_cache[code] = fromDb;
+    return fromDb;
   }
 
   function refresh_grid() {
@@ -2423,12 +2443,18 @@ function open_po_item_data_entry(frm, prefill) {
         ? (grid.get_data() || [])
         : ((grid.df && grid.df.data) || dialog.fields_dict.items_table.df.data || []));
 
+    const previousByName = {};
+    (items_data || []).forEach((row) => {
+      if (row && row.name) previousByName[row.name] = row;
+    });
+
     items_data = (gridData || []).map((row) => {
-      const baseQty = toNum(row.base_qty || row.custom_base_qty || row.qty || 0);
-      const wastagePct = toNum(row.custom_wastage_percentage);
-      const wastageQty = toNum(typeof row.custom_wastage_qty !== "undefined" ? row.custom_wastage_qty : ((baseQty * wastagePct) / 100));
-      const extraQty = toNum(row.extra_qty);
-      const poQty = toNum(typeof row.po_qty !== "undefined" ? row.po_qty : row.qty);
+      const previous = row && row.name ? (previousByName[row.name] || {}) : {};
+      const baseQty = toNum((typeof row.base_qty !== "undefined" ? row.base_qty : previous.base_qty) || row.custom_base_qty || row.qty || 0);
+      const wastagePct = toNum(typeof row.custom_wastage_percentage !== "undefined" ? row.custom_wastage_percentage : previous.custom_wastage_percentage);
+      const wastageQty = toNum(typeof row.custom_wastage_qty !== "undefined" ? row.custom_wastage_qty : previous.custom_wastage_qty);
+      const extraQty = toNum(typeof row.extra_qty !== "undefined" ? row.extra_qty : previous.extra_qty);
+      const poQty = toNum(typeof row.po_qty !== "undefined" ? row.po_qty : (typeof previous.po_qty !== "undefined" ? previous.po_qty : row.qty));
       return {
         ...row,
         supplier: row.supplier || dialog.get_value("supplier") || "",
@@ -2514,6 +2540,10 @@ function open_po_item_data_entry(frm, prefill) {
     }
     if (!item_code) {
       frappe.show_alert({ message: __("Select Item"), indicator: "orange" });
+      return;
+    }
+    if (await is_template_item(item_code)) {
+      frappe.msgprint(__("Item {0} is a template. Please select one of its variants.", [item_code]));
       return;
     }
     if (qty <= 0) {
@@ -2788,7 +2818,13 @@ function open_po_item_data_entry(frm, prefill) {
         if (prefillSupplier && !dialog.get_value("supplier")) dialog.set_value("supplier", prefillSupplier);
         else if (firstSupplier && !dialog.get_value("supplier")) dialog.set_value("supplier", firstSupplier);
         if (prefillWarehouse && !dialog.get_value("warehouse")) dialog.set_value("warehouse", prefillWarehouse);
-        prefill.rows.forEach((row) => {
+        const skippedTemplateItems = [];
+        for (const row of prefill.rows) {
+          const code = String((row && row.item_code) || "").trim();
+          if (code && (await is_template_item(code))) {
+            skippedTemplateItems.push(code);
+            continue;
+          }
           const baseQty = toNum(row.base_qty || row.qty || 0);
           const wp = toNum(row.custom_wastage_percentage || row.wastage_pct || 0);
           const wq = toNum(row.custom_wastage_qty || row.wastage_qty || ((baseQty * wp) / 100));
@@ -2810,7 +2846,13 @@ function open_po_item_data_entry(frm, prefill) {
             extra_qty: extra,
             po_qty: poQty,
           });
-        });
+        }
+        if (skippedTemplateItems.length) {
+          frappe.show_alert({
+            message: __("Skipped template item(s): {0}", [Array.from(new Set(skippedTemplateItems)).join(", ")]),
+            indicator: "orange",
+          }, 6);
+        }
         refresh_grid();
       }
       if (prefill.item_code) dialog.set_value("item_code", prefill.item_code);
