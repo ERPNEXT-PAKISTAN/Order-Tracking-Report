@@ -1228,9 +1228,11 @@ function buildAllRelatedLinksHtml(frm, data) {
     "Production Plan": [],
     "Work Order": [],
     "Job Card": [],
+    "Stock Entry": [],
     "Purchase Order": [],
     "Purchase Receipt": [],
     "Purchase Invoice": [],
+    "Per Piece Salary": [],
     "Delivery Note": [],
     "Sales Invoice": [],
   };
@@ -1263,6 +1265,15 @@ function buildAllRelatedLinksHtml(frm, data) {
     (row.invoices || []).forEach((invoice) => {
       if (invoice && invoice.name) groups["Sales Invoice"].push(invoice.name);
     });
+  });
+
+  ((data.item_document_links || [])).forEach((row) => {
+    (row.stock_entries || []).forEach((x) => x && x.name && groups["Stock Entry"].push(x.name));
+    (row.salary_slips || []).forEach((x) => x && x.name && groups["Per Piece Salary"].push(x.name));
+  });
+
+  (data.labour_cost_employee_item_wise || []).forEach((row) => {
+    splitDocNames(row.salary_slips).forEach((name) => groups["Per Piece Salary"].push(name));
   });
 
   const sections = Object.keys(groups).map((doctype) => {
@@ -1315,6 +1326,10 @@ function buildPlanningItemLinksHtml(frm, data, itemCode) {
     "Work Order": [],
     "Job Card": [],
     "Stock Entry": [],
+    "Purchase Order": [],
+    "Purchase Receipt": [],
+    "Purchase Invoice": [],
+    "Per Piece Salary": [],
     "Delivery Note": [],
     "Sales Invoice": [],
   };
@@ -1328,6 +1343,10 @@ function buildPlanningItemLinksHtml(frm, data, itemCode) {
   (itemLinks.work_orders || []).forEach((row) => pushDoc("Work Order", row.name));
   (itemLinks.job_cards || []).forEach((row) => pushDoc("Job Card", row.name));
   (itemLinks.stock_entries || []).forEach((row) => pushDoc("Stock Entry", row.name));
+  (itemLinks.purchase_orders || []).forEach((row) => pushDoc("Purchase Order", row.name));
+  (itemLinks.purchase_receipts || []).forEach((row) => pushDoc("Purchase Receipt", row.name));
+  (itemLinks.purchase_invoices || []).forEach((row) => pushDoc("Purchase Invoice", row.name));
+  (itemLinks.salary_slips || []).forEach((row) => pushDoc("Per Piece Salary", row.name));
   (itemLinks.delivery_notes || []).forEach((row) => pushDoc("Delivery Note", row.name));
   (itemLinks.sales_invoices || []).forEach((row) => pushDoc("Sales Invoice", row.name));
 
@@ -1369,6 +1388,7 @@ function relatedDocChip(doctype, name) {
     "Purchase Order": "purchase-order",
     "Purchase Receipt": "purchase-receipt",
     "Purchase Invoice": "purchase-invoice",
+    "Per Piece Salary": "per-piece-salary",
     "Delivery Note": "delivery-note",
     "Sales Invoice": "sales-invoice",
   };
@@ -1430,7 +1450,7 @@ function labourCostTable(rows, summary){
       <td style="text-align:right;">${soFlt(r.rate)}</td>
       <td style="text-align:right;">${fmtCurrency(r.labour_cost || 0)}</td>
     </tr>
-  `).join("") : `<tr><td colspan="7" class="text-muted">No employee item-wise labour cost for this Sales Order.</td></tr>`;
+  `).join("") : `<tr><td colspan="8" class="text-muted">No employee item-wise labour cost for this Sales Order.</td></tr>`;
 
   return `
     <div style="display:flex;gap:12px;margin-bottom:10px;">
@@ -1929,7 +1949,7 @@ function labourCostTable(rows, summary){
       <td style="text-align:right;">${soFlt(r.rate)}</td>
       <td style="text-align:right;">${fmtCurrency(r.labour_cost || 0)}</td>
     </tr>
-  `).join("") : `<tr><td colspan="7" class="text-muted">No employee item-wise labour cost for this Sales Order.</td></tr>`;
+  `).join("") : `<tr><td colspan="8" class="text-muted">No employee item-wise labour cost for this Sales Order.</td></tr>`;
 
   return `
     <div style="display:grid;grid-template-columns:repeat(2,minmax(260px,1fr));gap:12px;margin-bottom:12px;">
@@ -3037,14 +3057,14 @@ function labourCostTable(rows, summary){
   rows = rows || []; summary = summary || {};
   const body = rows.length ? rows.map(r => `
     <tr><td>${esc(r.employee || "-")}</td><td>${esc(r.name1 || "-")}</td><td>${esc(r.product || "-")}</td><td>${esc(r.process_type || "-")}</td>
-    <td style="text-align:right;">${_n0(r.qty)}</td><td style="text-align:right;">${_n0(r.rate)}</td><td style="text-align:right;">${_money0(r.labour_cost || 0)}</td></tr>
+    <td style="text-align:right;">${_n0(r.qty)}</td><td style="text-align:right;">${_n0(r.rate)}</td><td style="text-align:right;">${_money0(r.labour_cost || 0)}</td><td>${_csvDocLinks("Per Piece Salary", r.salary_slips)}</td></tr>
   `).join("") : `<tr><td colspan="7" class="text-muted">No employee item-wise labour cost for this Sales Order.</td></tr>`;
   return `
     <div style="display:grid;grid-template-columns:repeat(2,minmax(260px,1fr));gap:12px;margin-bottom:12px;">
       <div class="so-mini-card" style="height:132px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;padding:14px 16px;"><div class="so-mini-title">LABOUR QTY</div><div class="so-mini-val" style="font-size:30px;line-height:1.1;">${_n0(summary.total_qty || 0)}</div></div>
       <div class="so-mini-card" style="height:132px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;padding:14px 16px;"><div class="so-mini-title">TOTAL LABOUR COST</div><div class="so-mini-val" style="font-size:30px;line-height:1.1;">${_money0(summary.total_cost || 0)}</div></div>
     </div>
-    <div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;"><thead><tr><th>Employee</th><th>Name</th><th>Item</th><th>Process</th><th style="text-align:right;">Qty</th><th style="text-align:right;">Rate</th><th style="text-align:right;">Labour Cost</th></tr></thead><tbody>${body}</tbody></table></div>
+    <div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;"><thead><tr><th>Employee</th><th>Name</th><th>Item</th><th>Process</th><th style="text-align:right;">Qty</th><th style="text-align:right;">Rate</th><th style="text-align:right;">Labour Cost</th><th>Salary</th></tr></thead><tbody>${body}</tbody></table></div>
   `;
 }
 

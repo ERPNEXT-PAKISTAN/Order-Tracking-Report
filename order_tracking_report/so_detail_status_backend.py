@@ -1481,50 +1481,30 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                         linked_item_map[item_code] = {"po_qty": 0, "pr_qty": 0}
                     linked_item_map[item_code]["pr_qty"] = to_float(linked_item_map[item_code].get("pr_qty")) + to_float(a.get("pr_qty"))
     
-        # Include non-BOM items that are part of this Sales Order procurement flow
-        # (from Item PO rows or linked Purchase Orders), so they also appear here.
-        existing_codes = {}
-        for r in rows:
-            code = r.get("item_code")
-            if code:
-                existing_codes[code] = 1
-    
-        extra_codes = []
-        for code in fallback_item_map:
-            if code and code not in existing_codes:
-                extra_codes.append(code)
-        for code in linked_item_map:
-            if code and code not in existing_codes and code not in extra_codes:
-                extra_codes.append(code)
-        for code in item_po_plan_map:
-            if code and code not in existing_codes and code not in extra_codes:
-                extra_codes.append(code)
-    
-        for code in extra_codes:
-            linked = linked_item_map.get(code) or {}
-            fallback = fallback_item_map.get(code) or {}
-            planned_qty = to_float(item_po_plan_map.get(code))
-            po_qty = max(to_float(linked.get("po_qty")), to_float(fallback.get("po_qty")))
-            req_qty = max(planned_qty, po_qty)
-            stock_qty = get_bin_stock(code)
-            shortage_qty = req_qty - stock_qty
-            if shortage_qty < 0:
-                shortage_qty = 0
-    
-            rows.append({
-                "fg_item": "",
-                "order_qty": 0,
-                "bom": "",
-                "item_code": code,
-                "qty_per_bom": 0,
-                "required_qty": req_qty,
-                "stock_qty": stock_qty,
-                "shortage_qty": shortage_qty,
-                "purchase_suggestion_qty": shortage_qty,
-            })
-    
+        item_codes_in_rows = uniq_list([r.get("item_code") for r in rows if r.get("item_code")])
+        if item_codes_in_rows:
+            item_meta_map = {}
+            meta_rows = safe_sql(
+                "SELECT name, item_group, IFNULL(has_variants, 0) AS has_variants, IFNULL(is_purchase_item, 0) AS is_purchase_item "
+                "FROM `tabItem` WHERE name IN %(items)s",
+                {"items": tuple(item_codes_in_rows)}
+            )
+            for x in meta_rows:
+                item_meta_map[x.get("name")] = x
+
+            # This section must stay BOM-driven purchase planning only.
+            # Exclude template and non-purchase items from shortage suggestions.
+            rows = [
+                r
+                for r in rows
+                if (
+                    (item_meta_map.get(r.get("item_code")) or {}).get("has_variants") in [0, "0", False]
+                    and (item_meta_map.get(r.get("item_code")) or {}).get("is_purchase_item") in [1, "1", True]
+                )
+            ]
+
         missing_map_codes = []
-        for code in extra_codes:
+        for code in uniq_list([r.get("item_code") for r in rows if r.get("item_code")]):
             if code and code not in item_group_map:
                 missing_map_codes.append(code)
         if missing_map_codes:
@@ -1888,7 +1868,8 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
     
         rows = safe_sql(
             "SELECT pp.employee, pp.name1, pp.product, pp.process_type, "
-            "SUM(IFNULL(pp.qty,0)) AS qty, SUM(IFNULL(pp.amount,0)) AS labour_cost "
+            "SUM(IFNULL(pp.qty,0)) AS qty, SUM(IFNULL(pp.amount,0)) AS labour_cost, "
+            "GROUP_CONCAT(DISTINCT pps.name ORDER BY pps.name SEPARATOR ', ') AS salary_slips "
             "FROM `tabPer Piece` pp "
             "JOIN `tabPer Piece Salary` pps ON pps.name = pp.parent "
             "WHERE pp.parenttype='Per Piece Salary' AND pp.parentfield='perpiece' "
@@ -2239,6 +2220,10 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                     "work_orders": [],
                     "job_cards": [],
                     "stock_entries": [],
+                    "purchase_orders": [],
+                    "purchase_receipts": [],
+                    "purchase_invoices": [],
+                    "salary_slips": [],
                     "delivery_notes": [],
                     "sales_invoices": [],
                 }
@@ -2439,6 +2424,141 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
             )
 
         out = []
+        item_codes = uniq_list([row.get("item_code") for row in so_items if row.get("item_code")])
+
+        po_item_rows = []
+        po_item_to_item = {}
+        po_names = []
+        po_item_names = []
+
+        if item_codes:
+            po_item_rows = safe_sql(
+                "SELECT DISTINCT poi.name AS po_item, poi.item_code, po.name, po.status "
+                "FROM `tabPurchase Order Item` poi "
+                "JOIN `tabPurchase Order` po ON po.name = poi.parent "
+                "WHERE po.docstatus != 2 AND poi.sales_order = %(so)s AND poi.item_code IN %(items)s "
+                "ORDER BY po.modified DESC LIMIT 4000",
+                {"so": so, "items": tuple(item_codes)}
+            )
+
+        for row in po_item_rows:
+            po_item = row.get("po_item") or ""
+            item_code = row.get("item_code") or ""
+            if po_item and item_code:
+                po_item_to_item[po_item] = item_code
+                po_item_names.append(po_item)
+            if row.get("name"):
+                po_names.append(row.get("name"))
+            push_doc(
+                "",
+                item_code,
+                "purchase_orders",
+                {
+                    "name": row.get("name") or "",
+                    "status": row.get("status") or "—",
+                }
+            )
+
+        po_item_names = uniq_list(po_item_names)
+        po_names = uniq_list(po_names)
+
+        pr_rows = []
+        if po_names and item_codes:
+            pr_rows = safe_sql(
+                "SELECT DISTINCT pr.name, pr.status, pr.posting_date, pri.item_code, pri.purchase_order_item "
+                "FROM `tabPurchase Receipt` pr "
+                "JOIN `tabPurchase Receipt Item` pri ON pri.parent = pr.name "
+                "WHERE pr.docstatus != 2 AND pri.purchase_order IN %(po)s AND pri.item_code IN %(items)s "
+                "ORDER BY pr.posting_date DESC, pr.modified DESC LIMIT 4000",
+                {"po": tuple(po_names), "items": tuple(item_codes)}
+            )
+
+        pr_names = []
+        for row in pr_rows:
+            item_code = row.get("item_code") or po_item_to_item.get(row.get("purchase_order_item") or "") or ""
+            if row.get("name"):
+                pr_names.append(row.get("name"))
+            push_doc(
+                "",
+                item_code,
+                "purchase_receipts",
+                {
+                    "name": row.get("name") or "",
+                    "status": row.get("status") or "—",
+                    "posting_date": fmt_date(row.get("posting_date")),
+                }
+            )
+
+        pr_names = uniq_list(pr_names)
+
+        pi_rows = []
+        if po_item_names:
+            pi_rows.extend(
+                safe_sql(
+                    "SELECT DISTINCT pi.name, pi.status, pi.posting_date, pii.item_code, pii.po_detail "
+                    "FROM `tabPurchase Invoice` pi "
+                    "JOIN `tabPurchase Invoice Item` pii ON pii.parent = pi.name "
+                    "WHERE pi.docstatus != 2 AND pii.po_detail IN %(po_items)s "
+                    "ORDER BY pi.posting_date DESC, pi.modified DESC LIMIT 4000",
+                    {"po_items": tuple(po_item_names)}
+                )
+            )
+        if pr_names and item_codes:
+            pi_rows.extend(
+                safe_sql(
+                    "SELECT DISTINCT pi.name, pi.status, pi.posting_date, pii.item_code, '' AS po_detail "
+                    "FROM `tabPurchase Invoice` pi "
+                    "JOIN `tabPurchase Invoice Item` pii ON pii.parent = pi.name "
+                    "WHERE pi.docstatus != 2 AND pii.purchase_receipt IN %(pr)s AND pii.item_code IN %(items)s "
+                    "ORDER BY pi.posting_date DESC, pi.modified DESC LIMIT 4000",
+                    {"pr": tuple(pr_names), "items": tuple(item_codes)}
+                )
+            )
+
+        seen_pi = {}
+        for row in pi_rows:
+            item_code = row.get("item_code") or po_item_to_item.get(row.get("po_detail") or "") or ""
+            key = (row.get("name") or "") + "::" + item_code
+            if not row.get("name") or key in seen_pi:
+                continue
+            seen_pi[key] = 1
+            push_doc(
+                "",
+                item_code,
+                "purchase_invoices",
+                {
+                    "name": row.get("name") or "",
+                    "status": row.get("status") or "—",
+                    "posting_date": fmt_date(row.get("posting_date")),
+                }
+            )
+
+        salary_rows = []
+        if item_codes:
+            salary_rows = safe_sql(
+                "SELECT DISTINCT pps.name, pps.docstatus, pp.sales_order_item, pp.product AS item_code "
+                "FROM `tabPer Piece` pp "
+                "JOIN `tabPer Piece Salary` pps ON pps.name = pp.parent "
+                "WHERE pp.parenttype='Per Piece Salary' AND pp.parentfield='perpiece' "
+                "AND pp.sales_order = %(so)s AND pp.product IN %(items)s AND pps.docstatus < 2 "
+                "ORDER BY pps.modified DESC LIMIT 4000",
+                {"so": so, "items": tuple(item_codes)}
+            )
+
+        for row in salary_rows:
+            status = "Draft"
+            if int(to_float(row.get("docstatus"))) == 1:
+                status = "Submitted"
+            push_doc(
+                row.get("sales_order_item") or "",
+                row.get("item_code") or "",
+                "salary_slips",
+                {
+                    "name": row.get("name") or "",
+                    "status": status,
+                }
+            )
+
         for row in so_items:
             sales_order_item = row.get("name") or ""
             item_code = row.get("item_code") or ""
@@ -2451,6 +2571,10 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                 "work_orders": links.get("work_orders") or [],
                 "job_cards": links.get("job_cards") or [],
                 "stock_entries": links.get("stock_entries") or [],
+                "purchase_orders": links.get("purchase_orders") or [],
+                "purchase_receipts": links.get("purchase_receipts") or [],
+                "purchase_invoices": links.get("purchase_invoices") or [],
+                "salary_slips": links.get("salary_slips") or [],
                 "delivery_notes": links.get("delivery_notes") or [],
                 "sales_invoices": links.get("sales_invoices") or [],
             })
