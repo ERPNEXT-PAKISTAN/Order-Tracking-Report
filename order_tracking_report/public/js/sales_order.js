@@ -2633,7 +2633,11 @@ function open_po_item_data_entry(frm, prefill) {
     }
 
     try {
-      await frm.save();
+	  if (frm.doc.docstatus === 1) {
+		await frm.save("Update");
+	  } else {
+		await frm.save();
+	  }
     } catch (error) {
       frappe.msgprint({
         title: __("Unable to Save Sales Order"),
@@ -2644,8 +2648,10 @@ function open_po_item_data_entry(frm, prefill) {
       return;
     }
 
-    const savedRows = (frm.doc.custom_po_item || []).slice(-insertedRows.length);
-    const insertedRowNames = savedRows.map((row) => row.name).filter(Boolean);
+    const insertedRowNames = insertedRows
+	  .map((row) => row && row.name)
+	  .filter(Boolean)
+	  .filter((rowName) => (frm.doc.custom_po_item || []).some((row) => row.name === rowName));
     if (!insertedRowNames.length) {
       frappe.msgprint({
         title: __("Unable to Resolve PO Rows"),
