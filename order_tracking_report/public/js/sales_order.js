@@ -2410,10 +2410,11 @@ function open_po_item_data_entry(frm, prefill) {
     render_meta();
   }
 
-  function sync_items_from_grid() {
+  function sync_items_from_grid(options) {
+    const opts = options || {};
     const grid = dialog.fields_dict.items_table && dialog.fields_dict.items_table.grid;
     if (!grid) return;
-    if (document.activeElement && typeof document.activeElement.blur === "function") {
+    if (opts.blurActive && document.activeElement && typeof document.activeElement.blur === "function") {
       document.activeElement.blur();
     }
     const gridData = (grid.grid_rows || []).length
@@ -2443,11 +2444,43 @@ function open_po_item_data_entry(frm, prefill) {
       };
     });
 
-    dialog.fields_dict.items_table.df.data = items_data;
-    if (grid.df) {
-      grid.df.data = items_data;
-    }
     render_meta();
+  }
+
+  function get_selected_grid_docnames() {
+    const grid = dialog.fields_dict.items_table && dialog.fields_dict.items_table.grid;
+    if (!grid) return [];
+
+    let selected = [];
+    if (typeof grid.get_selected_children === "function") {
+      selected = (grid.get_selected_children() || []).map((d) => d && d.name).filter(Boolean);
+    }
+    if (!selected.length && typeof grid.get_selected === "function") {
+      const byName = grid.get_selected() || [];
+      selected = (Array.isArray(byName) ? byName : []).filter(Boolean);
+    }
+    if (!selected.length) {
+      selected = dialog.$wrapper
+        .find('[data-fieldname="items_table"] .grid-row-check:checked')
+        .map((_, el) => $(el).closest(".grid-row").attr("data-name"))
+        .get()
+        .filter(Boolean);
+    }
+
+    return Array.from(new Set(selected));
+  }
+
+  function delete_selected_rows_from_grid() {
+    sync_items_from_grid();
+    const selectedNames = get_selected_grid_docnames();
+    if (!selectedNames.length) {
+      frappe.show_alert({ message: __("Select row(s) to delete from Rows to Insert."), indicator: "orange" }, 4);
+      return;
+    }
+
+    items_data = items_data.filter((row) => !selectedNames.includes(row.name));
+    refresh_grid();
+    frappe.show_alert({ message: __("Selected row(s) removed."), indicator: "green" }, 3);
   }
 
   function recalc_qty_fields() {
@@ -2595,10 +2628,7 @@ function open_po_item_data_entry(frm, prefill) {
   }
 
   function insert_rows_into_po_table() {
-    if (document.activeElement && typeof document.activeElement.blur === "function") {
-      document.activeElement.blur();
-    }
-    sync_items_from_grid();
+    sync_items_from_grid({ blurActive: true });
     if (!items_data.length) {
       frappe.msgprint(__("Add at least one row."));
       return [];
@@ -2690,6 +2720,13 @@ function open_po_item_data_entry(frm, prefill) {
   dialog.show();
   const $dialogActions = dialog.$wrapper.find(".modal-footer .standard-actions");
   if ($dialogActions.length) {
+    $(`<button class="btn btn-danger btn-delete-po-rows">${frappe.utils.escape_html(__("Delete Selected Rows"))}</button>`)
+      .insertBefore(dialog.get_primary_btn())
+      .on("click", (e) => {
+        e.preventDefault();
+        delete_selected_rows_from_grid();
+      });
+
     $(
       `<button class="btn btn-success btn-create-po-and-add">${frappe.utils.escape_html(__("Create PO & Add in Table"))}</button>`
     ).insertBefore(dialog.get_primary_btn()).on("click", async (e) => {
@@ -2705,9 +2742,10 @@ function open_po_item_data_entry(frm, prefill) {
   $tbl.closest(".form-column").css({ flex: "0 0 100%", maxWidth: "100%" });
   dialog.$wrapper.find('[data-fieldname="items_table"]').closest(".form-group, .frappe-control, .form-column").css({ width: "100%" });
   $tbl.css({ width: "100%" });
+  const minGridWidth = "1900px";
   $tbl.find(".grid-body").css({ maxHeight: "340px", overflowY: "auto", overflowX: "auto", width: "100%" });
-  $tbl.find(".grid-body .rows, .grid-heading-row").css({ width: "100%" });
-  $tbl.find(".grid-heading-row .grid-row, .grid-body .grid-row").css({ width: "100%" });
+  $tbl.find(".grid-heading-row").css({ overflowX: "auto", width: "100%" });
+  $tbl.find(".grid-body .rows, .grid-heading-row, .grid-heading-row .grid-row, .grid-body .grid-row").css({ minWidth: minGridWidth });
   $tbl.off("focusout.po_grid change.po_grid", "input, select, textarea").on("focusout.po_grid change.po_grid", "input, select, textarea", () => {
     setTimeout(sync_items_from_grid, 0);
   });
