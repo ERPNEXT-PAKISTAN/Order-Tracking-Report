@@ -2217,14 +2217,15 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
             bom_tree = []
         for item_node in bom_tree:
             fg_item = (item_node or {}).get("item_code") or ""
-            for rm in ((item_node or {}).get("raw_materials") or []):
-                raw_code = (rm or {}).get("item_code") or ""
-                if not fg_item or not raw_code:
-                    continue
-                if raw_code not in raw_to_fg_items:
-                    raw_to_fg_items[raw_code] = []
-                if fg_item not in raw_to_fg_items[raw_code]:
-                    raw_to_fg_items[raw_code].append(fg_item)
+            for bom_row in ((item_node or {}).get("boms") or []):
+                for rm in ((bom_row or {}).get("raw_materials") or []):
+                    raw_code = (rm or {}).get("item_code") or ""
+                    if not fg_item or not raw_code:
+                        continue
+                    if raw_code not in raw_to_fg_items:
+                        raw_to_fg_items[raw_code] = []
+                    if fg_item not in raw_to_fg_items[raw_code]:
+                        raw_to_fg_items[raw_code].append(fg_item)
 
         links_by_so_item = {}
         links_by_item = {}
