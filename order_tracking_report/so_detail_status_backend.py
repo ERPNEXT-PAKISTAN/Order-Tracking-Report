@@ -2208,6 +2208,24 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
 
         so_item_names = [row.get("name") for row in so_items if row.get("name")]
 
+        # Map BOM raw material item -> finished good item(s) from this Sales Order,
+        # so item-level links can include procurement docs created against raw items.
+        raw_to_fg_items = {}
+        try:
+            bom_tree = get_bom_tree(so) or []
+        except Exception:
+            bom_tree = []
+        for item_node in bom_tree:
+            fg_item = (item_node or {}).get("item_code") or ""
+            for rm in ((item_node or {}).get("raw_materials") or []):
+                raw_code = (rm or {}).get("item_code") or ""
+                if not fg_item or not raw_code:
+                    continue
+                if raw_code not in raw_to_fg_items:
+                    raw_to_fg_items[raw_code] = []
+                if fg_item not in raw_to_fg_items[raw_code]:
+                    raw_to_fg_items[raw_code].append(fg_item)
+
         links_by_so_item = {}
         links_by_item = {}
 
@@ -2242,6 +2260,11 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                 ensure_bucket(item_code, links_by_item),
             ]):
                 append_doc(bucket.get(doc_key), payload)
+
+        def push_doc_with_raw_mapping(item_code, doc_key, payload):
+            push_doc("", item_code, doc_key, payload)
+            for fg_item in raw_to_fg_items.get(item_code, []):
+                push_doc("", fg_item, doc_key, payload)
 
         if so_item_names:
             production_plan_rows = safe_sql(
@@ -2472,8 +2495,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
                 po_item_names.append(po_item)
             if row.get("name"):
                 po_names.append(row.get("name"))
-            push_doc(
-                "",
+            push_doc_with_raw_mapping(
                 item_code,
                 "purchase_orders",
                 {
@@ -2501,8 +2523,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
             item_code = row.get("item_code") or po_item_to_item.get(row.get("purchase_order_item") or "") or ""
             if row.get("name"):
                 pr_names.append(row.get("name"))
-            push_doc(
-                "",
+            push_doc_with_raw_mapping(
                 item_code,
                 "purchase_receipts",
                 {
@@ -2545,8 +2566,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
             if not row.get("name") or key in seen_pi:
                 continue
             seen_pi[key] = 1
-            push_doc(
-                "",
+            push_doc_with_raw_mapping(
                 item_code,
                 "purchase_invoices",
                 {
