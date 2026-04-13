@@ -312,6 +312,41 @@ def _compute_selected_profit(order_profit_rows, selected_items):
     }
 
 
+def _build_profit_summary_from_rows(rows):
+    total_sales = 0
+    total_cost = 0
+    for row in rows or []:
+        total_sales = total_sales + frappe.utils.flt(row.get("sales_amount"))
+        total_cost = total_cost + frappe.utils.flt(row.get("estimated_cost"))
+
+    total_profit = total_sales - total_cost
+    margin_pct = (total_profit * 100.0 / total_sales) if total_sales else 0
+    return {
+        "sales_amount": total_sales,
+        "estimated_cost": total_cost,
+        "estimated_profit": total_profit,
+        "margin_pct": round(margin_pct, 2),
+    }
+
+
+def _apply_material_cost_by_item(profit_rows, cost_by_item):
+    cost_by_item = cost_by_item or {}
+    out = []
+    for row in profit_rows or []:
+        item_code = (row.get("item_code") or "").strip()
+        sales_amount = frappe.utils.flt(row.get("sales_amount"))
+        estimated_cost = frappe.utils.flt(cost_by_item.get(item_code))
+        estimated_profit = sales_amount - estimated_cost
+        margin_pct = (estimated_profit * 100.0 / sales_amount) if sales_amount else 0
+
+        updated = dict(row)
+        updated["estimated_cost"] = estimated_cost
+        updated["estimated_profit"] = estimated_profit
+        updated["margin_pct"] = round(margin_pct, 2)
+        out.append(updated)
+    return out
+
+
 def _merge_profit_rows(payloads):
     rows = []
     summary = {
@@ -1255,32 +1290,68 @@ def get_sales_order_pl_by_wo(sales_order=None, delivery_note=None):
             selected_qty_by_item,
             order_qty_by_item,
         )
+
+        wo_rows_full = _flatten_work_order_consumption_rows(
+            payload_sales_orders,
+            selected_qty_by_item={},
+            order_qty_by_item=order_qty_by_item,
+        )
         wo_rows = _flatten_work_order_consumption_rows(
             payload_sales_orders,
             selected_qty_by_item=selected_qty_by_item,
             order_qty_by_item=order_qty_by_item,
         )
-        material_codes = [(row.get("material_item_code") or "").strip() for row in wo_rows]
+
+        material_codes = [
+            (row.get("material_item_code") or "").strip()
+            for row in (wo_rows_full + wo_rows)
+        ]
         material_group_map = _get_item_group_map(material_codes)
         material_rate_map = _get_last_purchase_rate_map(material_codes, company=(base_payload.get("company") or "").strip())
+        cost_by_item_full = {}
+        cost_by_item_selected = {}
+
+        for row in wo_rows_full:
+            material_code = (row.get("material_item_code") or "").strip()
+            row["material_item_group"] = material_group_map.get(material_code, "Unclassified") or "Unclassified"
+            row["last_purchase_rate"] = frappe.utils.flt(material_rate_map.get(material_code))
+            item_code = (row.get("item_code") or "").strip()
+            if item_code:
+                cost_by_item_full[item_code] = cost_by_item_full.get(item_code, 0) + (
+                    frappe.utils.flt(row.get("required_qty")) * frappe.utils.flt(row.get("last_purchase_rate"))
+                )
+
         for row in wo_rows:
             material_code = (row.get("material_item_code") or "").strip()
             row["material_item_group"] = material_group_map.get(material_code, "Unclassified") or "Unclassified"
             row["last_purchase_rate"] = frappe.utils.flt(material_rate_map.get(material_code))
+            item_code = (row.get("item_code") or "").strip()
+            if item_code:
+                cost_by_item_selected[item_code] = cost_by_item_selected.get(item_code, 0) + (
+                    frappe.utils.flt(row.get("required_qty")) * frappe.utils.flt(row.get("last_purchase_rate"))
+                )
+
+        profit_rows_wo = _apply_material_cost_by_item(profit_rows, cost_by_item_full)
+        selected_profit_rows_wo = _apply_material_cost_by_item(
+            selected_profit_rows,
+            cost_by_item_selected if selected_qty_by_item else cost_by_item_full,
+        )
+        profit_summary_wo = _build_profit_summary_from_rows(profit_rows_wo)
+        selected_profit_summary_wo = _build_profit_summary_from_rows(selected_profit_rows_wo)
 
         related_expenses = _build_related_expenses(
-            selected_profit_summary,
+            selected_profit_summary_wo,
             scaled_labour.get("summary") or {},
             po_item_group_summary,
         )
         statement_rows = _build_statement_rows(
-            selected_profit_summary,
+            selected_profit_summary_wo,
             scaled_labour.get("summary") or {},
             po_item_group_summary,
         )
-        item_group_summary = _build_item_group_summary(selected_profit_rows)
+        item_group_summary = _build_item_group_summary(selected_profit_rows_wo)
         hierarchical_statement_rows = _build_hierarchical_statement_rows(
-            selected_profit_rows,
+            selected_profit_rows_wo,
             wo_rows,
             scaled_labour.get("rows") or [],
             po_item_group_summary,
@@ -1294,10 +1365,10 @@ def get_sales_order_pl_by_wo(sales_order=None, delivery_note=None):
             "delivery_note_meta": selected_delivery_meta,
             "delivery_note_items": selected_delivery_items,
             "invoice_details": selected_invoice_details,
-            "profit_summary": profit_summary,
-            "profit_by_item": profit_rows,
-            "selected_profit_summary": selected_profit_summary,
-            "selected_profit_by_item": selected_profit_rows,
+            "profit_summary": profit_summary_wo,
+            "profit_by_item": profit_rows_wo,
+            "selected_profit_summary": selected_profit_summary_wo,
+            "selected_profit_by_item": selected_profit_rows_wo,
             "bom_rows": wo_rows,
             "material_shortage": base_payload.get("material_shortage") or [],
             "labour_cost_rows": scaled_labour.get("rows") or [],
