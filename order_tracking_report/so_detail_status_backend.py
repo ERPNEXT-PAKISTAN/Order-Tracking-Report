@@ -1,7 +1,7 @@
 import frappe
 
 
-def run(sales_order=None, action=None, doctype=None, docname=None):
+def run(sales_order=None, action=None, doctype=None, docname=None, stock_location=None):
     doc_doctype = doctype
     doc_name = docname
     
@@ -809,13 +809,51 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
     # ---------------------------------------------------------
     # BOM / RAW MATERIALS / SHORTAGE
     # ---------------------------------------------------------
-    def get_bin_stock(item_code):
-        rs = safe_sql(
-            "SELECT SUM(actual_qty) AS qty "
-            "FROM `tabBin` "
-            "WHERE item_code = %(item)s",
-            {"item": item_code}
+    def get_stock_location_warehouses(location_name):
+        location_name = (location_name or "").strip()
+        if not location_name:
+            return []
+
+        wh = safe_sql(
+            "SELECT name, is_group, lft, rgt FROM `tabWarehouse` WHERE name = %(name)s LIMIT 1",
+            {"name": location_name},
         )
+        if not wh:
+            return []
+
+        row = wh[0]
+        if int(row.get("is_group") or 0):
+            children = safe_sql(
+                "SELECT name FROM `tabWarehouse` "
+                "WHERE lft >= %(lft)s AND rgt <= %(rgt)s AND ifnull(is_group,0) = 0",
+                {"lft": row.get("lft"), "rgt": row.get("rgt")},
+            )
+            return [c.get("name") for c in children if c.get("name")]
+
+        return [row.get("name")]
+
+
+    selected_stock_location = (stock_location or "").strip()
+    stock_location_warehouses = get_stock_location_warehouses(selected_stock_location)
+
+
+    def get_bin_stock(item_code):
+        if selected_stock_location:
+            if not stock_location_warehouses:
+                return 0.0
+            rs = safe_sql(
+                "SELECT SUM(actual_qty) AS qty "
+                "FROM `tabBin` "
+                "WHERE item_code = %(item)s AND warehouse IN %(warehouses)s",
+                {"item": item_code, "warehouses": tuple(stock_location_warehouses)},
+            )
+        else:
+            rs = safe_sql(
+                "SELECT SUM(actual_qty) AS qty "
+                "FROM `tabBin` "
+                "WHERE item_code = %(item)s",
+                {"item": item_code}
+            )
         if rs and rs[0].get("qty") is not None:
             return to_float(rs[0].get("qty"))
         return 0.0
@@ -2632,6 +2670,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
     
     elif not sales_order:
         frappe.response["message"] = {
+            "stock_location": selected_stock_location,
             "production_tree": [],
             "production_totals": {
                 "total_qty": 0,
@@ -2676,6 +2715,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None):
         po_item_group_summary = get_po_item_group_summary(sales_order)
     
         frappe.response["message"] = {
+            "stock_location": selected_stock_location,
             "production_tree": prod.get("tree") or [],
             "production_totals": prod.get("totals") or {
                 "total_qty": 0,

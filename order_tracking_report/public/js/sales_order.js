@@ -149,23 +149,59 @@ frappe.ui.form.on("Sales Order", {
     const f = frm.get_field("custom_detail_status");
     if (!f) return;
 
-    f.$wrapper.html(`<div class="text-muted">Loading report...</div>`);
+    const currentLocation = (frm.__connection_stock_location || "").trim();
+    f.$wrapper.html(`
+      <div class="so-connection-filter" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:10px;">
+        <div data-field="stock_location" style="min-width:260px;"></div>
+        <button class="btn btn-sm btn-primary" data-action="apply-stock-location">${__("Apply Location")}</button>
+        <button class="btn btn-sm btn-default" data-action="clear-stock-location">${__("Clear")}</button>
+      </div>
+      <div data-dashboard-body><div class="text-muted">Loading report...</div></div>
+    `);
+
+    const locationControl = frappe.ui.form.make_control({
+      parent: f.$wrapper.find('[data-field="stock_location"]')[0],
+      df: {
+        fieldtype: "Link",
+        fieldname: "stock_location",
+        label: __("Stock Location"),
+        options: "Warehouse",
+      },
+      render_input: true,
+    });
+    locationControl.set_value(currentLocation || "");
+
+    f.$wrapper.find('[data-action="apply-stock-location"]').off("click").on("click", () => {
+      frm.__connection_stock_location = (locationControl.get_value() || "").trim();
+      frm.trigger("render_execution_dashboard");
+    });
+
+    f.$wrapper.find('[data-action="clear-stock-location"]').off("click").on("click", () => {
+      frm.__connection_stock_location = "";
+      frm.trigger("render_execution_dashboard");
+    });
+
+    const $dashboardBody = f.$wrapper.find('[data-dashboard-body]');
 
     frappe.call({
       method: "order_tracking_report.api.custom_so_execution_status",
-      args: { sales_order: frm.doc.name },
+      args: {
+        sales_order: frm.doc.name,
+        stock_location: (frm.__connection_stock_location || "").trim(),
+      },
       callback: (r) => {
         const data = (r && r.message) ? r.message : {};
+        frm.__connection_stock_location = (data.stock_location || frm.__connection_stock_location || "").trim();
         cacheMaterialShortageItemGroups(frm, data);
-        f.$wrapper.html(buildDashboard(frm, data));
-        bindToggles(f.$wrapper);
-        bindPopupLinks(f.$wrapper);
-        bindSectionToggles(f.$wrapper);
-        bindMaterialShortageCreatePo(f.$wrapper, frm, data);
-        bindDashboardActionButtons(f.$wrapper, frm, data);
+        $dashboardBody.html(buildDashboard(frm, data));
+        bindToggles($dashboardBody);
+        bindPopupLinks($dashboardBody);
+        bindSectionToggles($dashboardBody);
+        bindMaterialShortageCreatePo($dashboardBody, frm, data);
+        bindDashboardActionButtons($dashboardBody, frm, data);
       },
       error: () => {
-        f.$wrapper.html(`<div class="text-danger">Detail status dashboard is not available.</div>`);
+        $dashboardBody.html(`<div class="text-danger">Detail status dashboard is not available.</div>`);
       }
     });
   },
