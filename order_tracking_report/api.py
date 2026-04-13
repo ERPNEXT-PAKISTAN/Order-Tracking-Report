@@ -142,6 +142,76 @@ def _flatten_bom_rows(tree, selected_qty_by_item=None):
     return rows
 
 
+def _flatten_work_order_consumption_rows(sales_orders, selected_qty_by_item=None, order_qty_by_item=None):
+    sales_orders = [
+        (so or "").strip()
+        for so in (sales_orders or [])
+        if (so or "").strip()
+    ]
+    if not sales_orders:
+        return []
+
+    selected_qty_by_item = selected_qty_by_item or {}
+    order_qty_by_item = order_qty_by_item or {}
+
+    rows = frappe.db.sql(
+        """
+        SELECT
+            wo.sales_order,
+            wo.production_item AS item_code,
+            woi.item_code AS material_item_code,
+            SUM(IFNULL(woi.consumed_qty, 0)) AS consumed_qty
+        FROM `tabWork Order` wo
+        JOIN `tabWork Order Item` woi ON woi.parent = wo.name
+        WHERE
+            wo.docstatus < 2
+            AND wo.sales_order IN %(sales_orders)s
+            AND IFNULL(woi.item_code, '') != ''
+        GROUP BY wo.sales_order, wo.production_item, woi.item_code
+        ORDER BY wo.production_item, woi.item_code
+        """,
+        {"sales_orders": tuple(sales_orders)},
+        as_dict=True,
+    )
+
+    out = []
+    for row in rows or []:
+        item_code = (row.get("item_code") or "").strip()
+        material_item_code = (row.get("material_item_code") or "").strip()
+        if not item_code or not material_item_code:
+            continue
+
+        consumed_qty = frappe.utils.flt(row.get("consumed_qty"))
+        if consumed_qty <= 0:
+            continue
+
+        scale_ratio = 1
+        shown_order_qty = frappe.utils.flt(order_qty_by_item.get(item_code))
+        if selected_qty_by_item:
+            selected_qty = frappe.utils.flt(selected_qty_by_item.get(item_code))
+            if selected_qty <= 0:
+                continue
+            order_qty = frappe.utils.flt(order_qty_by_item.get(item_code))
+            scale_ratio = (selected_qty / order_qty) if order_qty else 0
+            shown_order_qty = selected_qty
+
+        required_qty = consumed_qty * scale_ratio
+
+        out.append(
+            {
+                "item_code": item_code,
+                "order_qty": shown_order_qty,
+                "bom": "",
+                "material_item_code": material_item_code,
+                "required_qty": required_qty,
+                "stock_qty": 0,
+                "shortage_qty": 0,
+            }
+        )
+
+    return out
+
+
 def _get_last_purchase_rate_map(item_codes, company=None):
     clean_codes = sorted({(code or "").strip() for code in item_codes or [] if (code or "").strip()})
     if not clean_codes:
@@ -1110,6 +1180,139 @@ def get_sales_order_pl_by_order(sales_order=None, delivery_note=None):
         }
     except Exception as error:
         frappe.log_error(frappe.get_traceback(), "PL by Order API Error")
+        return {
+            "error": str(error),
+        }
+
+
+@frappe.whitelist()
+def get_sales_order_pl_by_wo(sales_order=None, delivery_note=None):
+    try:
+        sales_order = (sales_order or "").strip()
+        delivery_note = (delivery_note or "").strip()
+        linked_sales_orders = []
+
+        if delivery_note:
+            linked_sales_orders = _get_sales_orders_from_delivery_note(delivery_note)
+            sales_order = _resolve_sales_order_from_delivery_note(delivery_note, sales_order) or sales_order
+        elif sales_order:
+            linked_sales_orders = [sales_order]
+
+        if not sales_order:
+            frappe.throw("Sales Order or Delivery Note is required")
+
+        payload_sales_orders = linked_sales_orders or [sales_order]
+        payloads = []
+        for payload_sales_order in payload_sales_orders:
+            payload = run_detail_status(sales_order=payload_sales_order) or {}
+            payload["sales_order"] = payload_sales_order
+            payloads.append(payload)
+
+        base_payload = _merge_payloads(payloads) if len(payloads) > 1 else (payloads[0] if payloads else {})
+        profit_rows = base_payload.get("profit_by_item") or []
+        profit_summary = base_payload.get("profit_summary") or {}
+        fulfillment_rows = base_payload.get("sales_fulfillment_hierarchy") or []
+        po_item_group_summary = base_payload.get("po_item_group_summary") or []
+        order_qty_by_item = {
+            (row.get("item_code") or "").strip(): frappe.utils.flt(row.get("qty"))
+            for row in profit_rows
+            if (row.get("item_code") or "").strip()
+        }
+        delivery_note_options = base_payload.get("delivery_note_options") or []
+
+        selected_delivery_meta = {}
+        selected_delivery_items = []
+        selected_invoice_details = []
+        selected_qty_by_item = {}
+        selected_profit_summary = profit_summary
+        selected_profit_rows = profit_rows
+
+        if delivery_note:
+            delivery_payload = run_detail_status(
+                action="doc_items",
+                doctype="Delivery Note",
+                docname=delivery_note,
+            ) or {}
+            selected_delivery_meta = delivery_payload.get("meta") or {}
+            selected_delivery_items = _get_delivery_note_items(delivery_note)
+            selected_qty_by_item = _aggregate_qty_by_item(selected_delivery_items)
+            selected_profit = _compute_selected_profit(profit_rows, selected_delivery_items)
+            selected_profit_summary = selected_profit.get("summary") or {}
+            selected_profit_rows = selected_profit.get("items") or []
+            selected_invoice_details = _get_selected_invoice_details(fulfillment_rows, delivery_note)
+
+        item_group_map = _get_item_group_map(
+            [row.get("item_code") for row in profit_rows]
+            + [row.get("item_code") for row in selected_profit_rows]
+            + [row.get("item_code") for row in selected_delivery_items]
+        )
+        profit_rows = _attach_item_groups(profit_rows, item_group_map)
+        selected_profit_rows = _attach_item_groups(selected_profit_rows, item_group_map)
+        selected_delivery_items = _attach_item_groups(selected_delivery_items, item_group_map)
+
+        scaled_labour = _scale_labour_rows(
+            base_payload.get("labour_cost_employee_item_wise") or [],
+            selected_qty_by_item,
+            order_qty_by_item,
+        )
+        wo_rows = _flatten_work_order_consumption_rows(
+            payload_sales_orders,
+            selected_qty_by_item=selected_qty_by_item,
+            order_qty_by_item=order_qty_by_item,
+        )
+        material_codes = [(row.get("material_item_code") or "").strip() for row in wo_rows]
+        material_group_map = _get_item_group_map(material_codes)
+        material_rate_map = _get_last_purchase_rate_map(material_codes, company=(base_payload.get("company") or "").strip())
+        for row in wo_rows:
+            material_code = (row.get("material_item_code") or "").strip()
+            row["material_item_group"] = material_group_map.get(material_code, "Unclassified") or "Unclassified"
+            row["last_purchase_rate"] = frappe.utils.flt(material_rate_map.get(material_code))
+
+        related_expenses = _build_related_expenses(
+            selected_profit_summary,
+            scaled_labour.get("summary") or {},
+            po_item_group_summary,
+        )
+        statement_rows = _build_statement_rows(
+            selected_profit_summary,
+            scaled_labour.get("summary") or {},
+            po_item_group_summary,
+        )
+        item_group_summary = _build_item_group_summary(selected_profit_rows)
+        hierarchical_statement_rows = _build_hierarchical_statement_rows(
+            selected_profit_rows,
+            wo_rows,
+            scaled_labour.get("rows") or [],
+            po_item_group_summary,
+        )
+
+        return {
+            "sales_order": sales_order,
+            "linked_sales_orders": linked_sales_orders,
+            "selected_delivery_note": delivery_note,
+            "delivery_note_options": delivery_note_options,
+            "delivery_note_meta": selected_delivery_meta,
+            "delivery_note_items": selected_delivery_items,
+            "invoice_details": selected_invoice_details,
+            "profit_summary": profit_summary,
+            "profit_by_item": profit_rows,
+            "selected_profit_summary": selected_profit_summary,
+            "selected_profit_by_item": selected_profit_rows,
+            "bom_rows": wo_rows,
+            "material_shortage": base_payload.get("material_shortage") or [],
+            "labour_cost_rows": scaled_labour.get("rows") or [],
+            "labour_cost_summary": scaled_labour.get("summary") or {},
+            "po_item_group_summary": po_item_group_summary,
+            "purchase_flow_rows": base_payload.get("purchase_flow_rows") or [],
+            "sales_fulfillment_hierarchy": fulfillment_rows,
+            "related_expenses": related_expenses,
+            "statement_rows": statement_rows,
+            "item_group_summary": item_group_summary,
+            "hierarchical_statement_rows": hierarchical_statement_rows,
+            "material_source": "wo_consumption",
+        }
+    except Exception as error:
+        frappe.log_error(frappe.get_traceback(), "PL by WO API Error")
         return {
             "error": str(error),
         }

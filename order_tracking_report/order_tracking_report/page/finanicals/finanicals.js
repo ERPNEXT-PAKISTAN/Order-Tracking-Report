@@ -19,6 +19,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		this.routeOptions = frappe.route_options || {};
 		frappe.route_options = null;
 		this.plControls = {};
+		this.plWoControls = {};
 		setTimeout(() => this.load(), 0);
 	}
 
@@ -45,7 +46,10 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		this.installPayloadStyles(payload.styles || "");
 		this.installLocalStyles();
 		this.executePayloadScript(payload.script || "");
-		setTimeout(() => this.setupPlByOrder(), 0);
+		setTimeout(() => {
+			this.setupPlByOrder();
+			this.setupPlByWo();
+		}, 0);
 	}
 
 	injectPlByOrderPanel(html) {
@@ -62,10 +66,23 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			const tab = doc.createElement("button");
 			tab.className = "tab";
 			tab.dataset.tab = "pl-by-order";
-			tab.textContent = "PL by Order";
+			tab.textContent = "PL by BOM";
 			const overviewTab = tabs.querySelector('[data-tab="overview"]');
 			if (overviewTab && overviewTab.nextSibling) {
 				tabs.insertBefore(tab, overviewTab.nextSibling);
+			} else {
+				tabs.appendChild(tab);
+			}
+		}
+
+		if (tabs && !root.querySelector('[data-tab="pl-by-wo"]')) {
+			const tab = doc.createElement("button");
+			tab.className = "tab";
+			tab.dataset.tab = "pl-by-wo";
+			tab.textContent = "PL by WO";
+			const bomTab = tabs.querySelector('[data-tab="pl-by-order"]');
+			if (bomTab && bomTab.nextSibling) {
+				tabs.insertBefore(tab, bomTab.nextSibling);
 			} else {
 				tabs.appendChild(tab);
 			}
@@ -77,8 +94,21 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			panel.className = "content-panel";
 			panel.innerHTML = `
 				<div class="section">
-					<h2 class="section-title">PL by Order</h2>
+					<h2 class="section-title">PL by BOM</h2>
 					<div id="otr-pl-order-shell"></div>
+				</div>
+			`;
+			dashboard.appendChild(panel);
+		}
+
+		if (!root.querySelector("#pl-by-wo")) {
+			const panel = doc.createElement("div");
+			panel.id = "pl-by-wo";
+			panel.className = "content-panel";
+			panel.innerHTML = `
+				<div class="section">
+					<h2 class="section-title">PL by WO</h2>
+					<div id="otr-pl-wo-shell"></div>
 				</div>
 			`;
 			dashboard.appendChild(panel);
@@ -557,7 +587,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				<button class="btn btn-primary btn-sm" data-action="load-pl-order">${__("Load")}</button>
 				<button class="btn btn-default btn-sm" data-action="reset-pl-order">${__("Reset")}</button>
 			</div>
-			<div class="otr-pl-status">${__("Select a Sales Order or Delivery Note to load PL by Order.")}</div>
+			<div class="otr-pl-status">${__("Select a Sales Order or Delivery Note to load PL by BOM.")}</div>
 			<div class="otr-pl-content"></div>
 		`);
 
@@ -627,6 +657,93 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		}
 	}
 
+	setupPlByWo() {
+		const shell = this.$root.find("#otr-pl-wo-shell");
+		if (!shell.length || shell.data("ready")) {
+			return;
+		}
+		shell.data("ready", true);
+		shell.addClass("otr-pl-order-shell");
+		shell.html(`
+			<div class="otr-pl-toolbar">
+				<div data-field="sales_order"></div>
+				<div data-field="delivery_note"></div>
+				<div data-field="wastage_pct"></div>
+				<div data-field="stitching_oh_pct"></div>
+				<div data-field="head_office_exp_pct"></div>
+				<div data-field="bank_charges_pct"></div>
+				<button class="btn btn-primary btn-sm" data-action="load-pl-wo">${__("Load")}</button>
+				<button class="btn btn-default btn-sm" data-action="reset-pl-wo">${__("Reset")}</button>
+			</div>
+			<div class="otr-pl-status">${__("Select a Sales Order or Delivery Note to load PL by WO.")}</div>
+			<div class="otr-pl-content"></div>
+		`);
+
+		this.$plWoShell = shell;
+		this.$plWoStatus = shell.find(".otr-pl-status");
+		this.$plWoContent = shell.find(".otr-pl-content");
+
+		this.plWoControls.sales_order = this.makeLinkControl(shell.find('[data-field="sales_order"]')[0], {
+			fieldname: "sales_order",
+			label: __("Sales Order"),
+			options: "Sales Order",
+			value: this.routeOptions.sales_order || "",
+		});
+
+		this.plWoControls.delivery_note = this.makeLinkControl(shell.find('[data-field="delivery_note"]')[0], {
+			fieldname: "delivery_note",
+			label: __("Delivery Note"),
+			options: "Delivery Note",
+			value: this.routeOptions.delivery_note || "",
+		});
+
+		this.plWoControls.wastage_pct = this.makeFloatControl(shell.find('[data-field="wastage_pct"]')[0], {
+			fieldname: "wastage_pct",
+			label: __("Wastage %"),
+			default: this.routeOptions.wastage_pct || 10,
+		});
+
+		this.plWoControls.stitching_oh_pct = this.makeFloatControl(shell.find('[data-field="stitching_oh_pct"]')[0], {
+			fieldname: "stitching_oh_pct",
+			label: __("Stitching OH %"),
+			default: this.routeOptions.stitching_oh_pct || 60,
+		});
+
+		this.plWoControls.head_office_exp_pct = this.makeFloatControl(shell.find('[data-field="head_office_exp_pct"]')[0], {
+			fieldname: "head_office_exp_pct",
+			label: __("Head Office Expense %age"),
+			default: this.routeOptions.head_office_exp_pct || 5,
+		});
+
+		this.plWoControls.bank_charges_pct = this.makeFloatControl(shell.find('[data-field="bank_charges_pct"]')[0], {
+			fieldname: "bank_charges_pct",
+			label: __("Bank Charges %age"),
+			default: this.routeOptions.bank_charges_pct || 3,
+		});
+
+		if (this.plWoControls.wastage_pct.$input) {
+			this.plWoControls.wastage_pct.$input.on("change", () => this.rebuildStatementFromCurrentWo());
+		}
+		if (this.plWoControls.stitching_oh_pct.$input) {
+			this.plWoControls.stitching_oh_pct.$input.on("change", () => this.rebuildStatementFromCurrentWo());
+		}
+		if (this.plWoControls.head_office_exp_pct.$input) {
+			this.plWoControls.head_office_exp_pct.$input.on("change", () => this.rebuildStatementFromCurrentWo());
+		}
+		if (this.plWoControls.bank_charges_pct.$input) {
+			this.plWoControls.bank_charges_pct.$input.on("change", () => this.rebuildStatementFromCurrentWo());
+		}
+
+		shell.find('[data-action="load-pl-wo"]').on("click", () => this.loadPlByWo());
+		shell.find('[data-action="reset-pl-wo"]').on("click", () => this.resetPlByWo());
+
+		if (this.routeOptions.sales_order || this.routeOptions.delivery_note) {
+			this.renderPlWoEmptyState();
+		} else {
+			this.renderPlWoEmptyState();
+		}
+	}
+
 	makeLinkControl(parent, config) {
 		const control = frappe.ui.form.make_control({
 			parent,
@@ -674,6 +791,13 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		}
 	}
 
+	openPlByWoTab() {
+		const tab = this.$root.find('[data-tab="pl-by-wo"]');
+		if (tab.length) {
+			tab.trigger("click");
+		}
+	}
+
 	resetPlByOrder() {
 		this.plControls.sales_order.set_value("");
 		this.plControls.delivery_note.set_value("");
@@ -682,7 +806,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		this.plControls.head_office_exp_pct.set_value(5);
 		this.plControls.bank_charges_pct.set_value(3);
 		this.latestPlData = null;
-		this.$plStatus.text(__("Select a Sales Order or Delivery Note to load PL by Order."));
+		this.$plStatus.text(__("Select a Sales Order or Delivery Note to load PL by BOM."));
 		this.renderPlEmptyState();
 	}
 
@@ -702,7 +826,14 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 	}
 
 	renderPlEmptyState() {
-		this.$plContent.html(`<div class="otr-pl-empty">${__("No PL by Order data loaded yet.")}</div>`);
+		this.$plContent.html(`<div class="otr-pl-empty">${__("No PL by BOM data loaded yet.")}</div>`);
+	}
+
+	renderPlWoEmptyState() {
+		if (!this.$plWoContent) {
+			return;
+		}
+		this.$plWoContent.html(`<div class="otr-pl-empty">${__("No PL by WO data loaded yet.")}</div>`);
 	}
 
 	async loadPlByOrder() {
@@ -721,8 +852,8 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		}
 
 		this.openPlByOrderTab();
-		this.$plStatus.text(__("Loading order-level profit and loss..."));
-		this.$plContent.html(`<div class="otr-pl-empty">${__("Loading PL by Order...")}</div>`);
+		this.$plStatus.text(__("Loading BOM-level profit and loss..."));
+		this.$plContent.html(`<div class="otr-pl-empty">${__("Loading PL by BOM...")}</div>`);
 
 		try {
 			const response = await frappe.call({
@@ -734,9 +865,9 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			});
 			const data = response.message || {};
 			if (data.error) {
-				this.$plStatus.text(__("PL by Order could not be loaded."));
+				this.$plStatus.text(__("PL by BOM could not be loaded."));
 				this.$plContent.html(`<div class="otr-pl-empty">${frappe.utils.escape_html(data.error || __("Unknown error"))}</div>`);
-				frappe.show_alert({ message: __("PL by Order failed: {0}", [data.error || __("Unknown error")]), indicator: "red" }, 7);
+				frappe.show_alert({ message: __("PL by BOM failed: {0}", [data.error || __("Unknown error")]), indicator: "red" }, 7);
 				return;
 			}
 			if (data.sales_order && !salesOrder && (!data.linked_sales_orders || data.linked_sales_orders.length <= 1)) {
@@ -744,9 +875,73 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			}
 			this.renderPlByOrder(data);
 		} catch (error) {
-			this.$plStatus.text(__("Failed to load PL by Order."));
-			this.$plContent.html(`<div class="otr-pl-empty">${__("PL by Order could not be loaded.")}</div>`);
-			frappe.show_alert({ message: __("Failed to load PL by Order."), indicator: "red" }, 5);
+			this.$plStatus.text(__("Failed to load PL by BOM."));
+			this.$plContent.html(`<div class="otr-pl-empty">${__("PL by BOM could not be loaded.")}</div>`);
+			frappe.show_alert({ message: __("Failed to load PL by BOM."), indicator: "red" }, 5);
+		}
+	}
+
+	resetPlByWo() {
+		this.plWoControls.sales_order.set_value("");
+		this.plWoControls.delivery_note.set_value("");
+		this.plWoControls.wastage_pct.set_value(10);
+		this.plWoControls.stitching_oh_pct.set_value(60);
+		this.plWoControls.head_office_exp_pct.set_value(5);
+		this.plWoControls.bank_charges_pct.set_value(3);
+		this.latestPlWoData = null;
+		this.$plWoStatus.text(__("Select a Sales Order or Delivery Note to load PL by WO."));
+		this.renderPlWoEmptyState();
+	}
+
+	rebuildStatementFromCurrentWo() {
+		if (!this.latestPlWoData) {
+			return;
+		}
+		this.renderPlByWo(this.latestPlWoData);
+	}
+
+	async loadPlByWo() {
+		const salesOrder = this.getControlValue(this.plWoControls.sales_order);
+		const deliveryNote = this.getControlValue(this.plWoControls.delivery_note);
+		if (!salesOrder && !deliveryNote) {
+			frappe.show_alert({ message: __("Enter Sales Order or Delivery Note."), indicator: "orange" }, 4);
+			return;
+		}
+
+		if (salesOrder && this.plWoControls.sales_order.get_value() !== salesOrder) {
+			this.plWoControls.sales_order.set_value(salesOrder);
+		}
+		if (deliveryNote && this.plWoControls.delivery_note.get_value() !== deliveryNote) {
+			this.plWoControls.delivery_note.set_value(deliveryNote);
+		}
+
+		this.openPlByWoTab();
+		this.$plWoStatus.text(__("Loading work-order consumption profit and loss..."));
+		this.$plWoContent.html(`<div class="otr-pl-empty">${__("Loading PL by WO...")}</div>`);
+
+		try {
+			const response = await frappe.call({
+				method: "order_tracking_report.api.get_sales_order_pl_by_wo",
+				args: {
+					sales_order: salesOrder,
+					delivery_note: deliveryNote,
+				},
+			});
+			const data = response.message || {};
+			if (data.error) {
+				this.$plWoStatus.text(__("PL by WO could not be loaded."));
+				this.$plWoContent.html(`<div class="otr-pl-empty">${frappe.utils.escape_html(data.error || __("Unknown error"))}</div>`);
+				frappe.show_alert({ message: __("PL by WO failed: {0}", [data.error || __("Unknown error")]), indicator: "red" }, 7);
+				return;
+			}
+			if (data.sales_order && !salesOrder && (!data.linked_sales_orders || data.linked_sales_orders.length <= 1)) {
+				this.plWoControls.sales_order.set_value(data.sales_order);
+			}
+			this.renderPlByWo(data);
+		} catch (error) {
+			this.$plWoStatus.text(__("Failed to load PL by WO."));
+			this.$plWoContent.html(`<div class="otr-pl-empty">${__("PL by WO could not be loaded.")}</div>`);
+			frappe.show_alert({ message: __("Failed to load PL by WO."), indicator: "red" }, 5);
 		}
 	}
 
@@ -767,7 +962,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		const statementModel = this.buildOrderStatementModel(data, { wastagePct, stitchingOhPct, headOfficeExpPct, bankChargesPct });
 		const modeLabel = selectedDn
 			? __("Showing Delivery Note level allocation using Sales Order default BOM costs.")
-			: __("Showing Sales Order level estimated profit and loss.");
+			: __("Showing Sales Order level estimated profit and loss by BOM.");
 
 		const salesOrderText = linkedSalesOrders.length > 1 ? linkedSalesOrders.join(", ") : (data.sales_order || "-");
 		this.$plStatus.text(`${__("Sales Order")}: ${salesOrderText}${selectedDn ? ` • ${__("Delivery Note")}: ${selectedDn}` : ""}`);
@@ -790,7 +985,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				<div class="otr-pl-section otr-pl-statement-section">
 					<div class="otr-pl-statement-title">
 						<h3>${__("PL Statement")}</h3>
-						<div class="otr-pl-statement-badge">${__("Order View")}</div>
+						<div class="otr-pl-statement-badge">${__("BOM View")}</div>
 					</div>
 					${this.renderGroupedStatementTable(statementModel, {
 						wastagePct,
@@ -844,11 +1039,111 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		`;
 
 		this.$plContent.html(html);
-		this.bindPlStatementInteractions();
+		this.bindPlStatementInteractions(this.$plContent);
 	}
 
-	bindPlStatementInteractions() {
-		this.$plContent.find(".otr-pl-toggle").off("click").on("click", (event) => {
+	renderPlByWo(data) {
+		this.latestPlWoData = data;
+		const summary = data.selected_profit_summary || data.profit_summary || {};
+		const baseSummary = data.profit_summary || {};
+		const labourSummary = data.labour_cost_summary || {};
+		const deliveryNotes = data.delivery_note_options || [];
+		const invoiceDetails = data.invoice_details || [];
+		const itemGroupSummary = data.item_group_summary || [];
+		const linkedSalesOrders = data.linked_sales_orders || [];
+		const selectedDn = data.selected_delivery_note || "";
+		const wastagePct = this.getPercentValue(this.plWoControls.wastage_pct);
+		const stitchingOhPct = this.getPercentValue(this.plWoControls.stitching_oh_pct);
+		const headOfficeExpPct = this.getPercentValue(this.plWoControls.head_office_exp_pct);
+		const bankChargesPct = this.getPercentValue(this.plWoControls.bank_charges_pct);
+		const statementModel = this.buildOrderStatementModel(data, { wastagePct, stitchingOhPct, headOfficeExpPct, bankChargesPct });
+		const modeLabel = selectedDn
+			? __("Showing Delivery Note level allocation using Work Order consumption costs.")
+			: __("Showing Sales Order level estimated profit and loss by Work Order consumption.");
+
+		const salesOrderText = linkedSalesOrders.length > 1 ? linkedSalesOrders.join(", ") : (data.sales_order || "-");
+		this.$plWoStatus.text(`${__("Sales Order")}: ${salesOrderText}${selectedDn ? ` • ${__("Delivery Note")}: ${selectedDn}` : ""}`);
+
+		const html = `
+			<div class="otr-pl-note">${frappe.utils.escape_html(modeLabel)} • ${__("Wastage %")}: ${this.formatPercent(wastagePct)} • ${__("Stitching OH %")}: ${this.formatPercent(stitchingOhPct)} • ${__("Head Office Expense %age")}: ${this.formatPercent(headOfficeExpPct)} • ${__("Bank Charges %age")}: ${this.formatPercent(bankChargesPct)}</div>
+			<div class="otr-pl-card-grid">
+				${this.renderMetricCard(__("Sales Amount"), this.formatCurrency(summary.sales_amount || 0), selectedDn ? __("Selected delivery note") : __("Sales order total"))}
+				${this.renderMetricCard(__("Material Cost"), this.formatCurrency(summary.estimated_cost || 0), __("From Work Order consumption"))}
+				${this.renderMetricCard(__("Estimated Profit"), this.formatCurrency(summary.estimated_profit || 0), `${this.formatPercent(summary.margin_pct || 0)} ${__("margin")}`)}
+				${this.renderMetricCard(__("Labour Cost"), this.formatCurrency(labourSummary.total_cost || 0), `${this.formatNumber(labourSummary.total_qty || 0)} ${__("qty")}`)}
+				${this.renderMetricCard(__("Wastage Amount"), this.formatCurrency(statementModel.wastageAmount || 0), `${this.formatPercent(wastagePct)} ${__("of raw material")}`)}
+				${this.renderMetricCard(__("Stitching OH Amount"), this.formatCurrency(statementModel.stitchingOhAmount || 0), `${this.formatPercent(stitchingOhPct)} ${__("of CMT labour")}`)}
+				${this.renderMetricCard(__("Head Office Expense"), this.formatCurrency(statementModel.headOfficeExpAmount || 0), `${this.formatPercent(headOfficeExpPct)} ${__("of sales")}`)}
+				${this.renderMetricCard(__("Bank Charges"), this.formatCurrency(statementModel.bankChargesAmount || 0), `${this.formatPercent(bankChargesPct)} ${__("of sales")}`)}
+				${this.renderMetricCard(__("Delivery Notes"), this.formatNumber(deliveryNotes.length), selectedDn ? __("Current selection applied") : __("Linked with this order"))}
+				${this.renderMetricCard(__("Base Order Profit"), this.formatCurrency(baseSummary.estimated_profit || 0), `${this.formatPercent(baseSummary.margin_pct || 0)} ${__("margin")}`)}
+			</div>
+			<div class="otr-pl-grid">
+				<div class="otr-pl-section otr-pl-statement-section">
+					<div class="otr-pl-statement-title">
+						<h3>${__("PL Statement")}</h3>
+						<div class="otr-pl-statement-badge">${__("WO View")}</div>
+					</div>
+					${this.renderGroupedStatementTable(statementModel, {
+						wastagePct,
+						stitchingOhPct,
+						headOfficeExpPct,
+						bankChargesPct,
+					})}
+				</div>
+				<div class="otr-pl-row-2">
+					<div class="otr-pl-section">
+						<h3>${__("Final Summary")}</h3>
+						${this.renderFinalSummaryTable(statementModel)}
+					</div>
+					<div class="otr-pl-section">
+						<h3>${__("Profit and Loss Summary")}</h3>
+						${this.renderProfitLossSummaryFromModel(statementModel, {
+							wastagePct,
+							stitchingOhPct,
+							headOfficeExpPct,
+							bankChargesPct,
+						})}
+					</div>
+				</div>
+				<div class="otr-pl-section">
+					<h3>${__("Item Group Wise Summary")}</h3>
+					${this.renderItemGroupSummaryTable(itemGroupSummary)}
+				</div>
+				<div class="otr-pl-section">
+					<h3>${__("Profit by Item")}</h3>
+					${this.renderProfitTable(data.selected_profit_by_item || [])}
+				</div>
+				<div class="otr-pl-section">
+					<h3>${__("Related Expenses")}</h3>
+					${this.renderRelatedExpensesTable(data.related_expenses || [])}
+				</div>
+				<div class="otr-pl-row-2">
+					<div class="otr-pl-section">
+						<h3>${selectedDn ? __("Delivery Note Items") : __("Linked Delivery Notes")}</h3>
+						${selectedDn ? this.renderDeliveryNoteItemTable(data.delivery_note_items || []) : this.renderDeliveryNoteOptionsTable(deliveryNotes)}
+					</div>
+					<div class="otr-pl-section">
+						<h3>${selectedDn ? __("Linked Sales Invoices") : __("Procurement by Item Group")}</h3>
+						${selectedDn ? this.renderInvoiceDetails(invoiceDetails) : this.renderPoItemGroupTable(data.po_item_group_summary || [])}
+					</div>
+				</div>
+				<div class="otr-pl-section">
+					<h3>${__("Labour Cost Detail")}</h3>
+					${this.renderLabourTable(data.labour_cost_rows || [], labourSummary)}
+				</div>
+			</div>
+		`;
+
+		this.$plWoContent.html(html);
+		this.bindPlStatementInteractions(this.$plWoContent);
+	}
+
+	bindPlStatementInteractions($container) {
+		if (!$container || !$container.length) {
+			return;
+		}
+		$container.find(".otr-pl-toggle").off("click").on("click", (event) => {
 			event.preventDefault();
 			const $button = $(event.currentTarget);
 			const groupKey = $button.attr("data-group-key");
@@ -859,7 +1154,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			const nextExpanded = !isExpanded;
 			$button.attr("aria-expanded", nextExpanded ? "true" : "false");
 			$button.find(".otr-pl-toggle-icon").text(nextExpanded ? "-" : "+");
-			this.$plContent.find(`[data-parent-group="${groupKey}"]`).toggleClass("otr-pl-row-hidden", !nextExpanded);
+			$container.find(`[data-parent-group="${groupKey}"]`).toggleClass("otr-pl-row-hidden", !nextExpanded);
 		});
 	}
 
