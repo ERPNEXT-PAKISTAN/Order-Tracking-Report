@@ -1116,13 +1116,14 @@ def get_sales_order_pl_by_order(sales_order=None, delivery_note=None):
 
 
 @frappe.whitelist()
-def custom_so_execution_status(sales_order=None, action=None, doctype=None, docname=None, stock_location=None):
+def custom_so_execution_status(sales_order=None, action=None, doctype=None, docname=None, stock_location=None, item_code=None):
     return run_detail_status(
         sales_order=sales_order,
         action=action,
         doctype=doctype,
         docname=docname,
         stock_location=stock_location,
+        item_code=item_code,
     )
 
 

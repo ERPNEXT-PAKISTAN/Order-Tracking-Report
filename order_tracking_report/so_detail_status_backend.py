@@ -1,7 +1,7 @@
 import frappe
 
 
-def run(sales_order=None, action=None, doctype=None, docname=None, stock_location=None):
+def run(sales_order=None, action=None, doctype=None, docname=None, stock_location=None, item_code=None):
     doc_doctype = doctype
     doc_name = docname
     
@@ -214,7 +214,8 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
     
     def get_work_orders_for_so(so):
         wo = safe_sql(
-            "SELECT name, status, production_item, qty, produced_qty, production_plan, "
+            "SELECT name, status, production_item, qty, produced_qty, process_loss_qty, disassembled_qty, "
+            "material_transferred_for_manufacturing, additional_transferred_qty, production_plan, "
             "planned_start_date, planned_end_date, actual_start_date, actual_end_date "
             "FROM `tabWork Order` "
             "WHERE sales_order = %(so)s "
@@ -225,7 +226,8 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             return wo
     
         return safe_sql(
-            "SELECT DISTINCT wo.name, wo.status, wo.production_item, wo.qty, wo.produced_qty, wo.production_plan, "
+            "SELECT DISTINCT wo.name, wo.status, wo.production_item, wo.qty, wo.produced_qty, wo.process_loss_qty, wo.disassembled_qty, "
+            "wo.material_transferred_for_manufacturing, wo.additional_transferred_qty, wo.production_plan, "
             "wo.planned_start_date, wo.planned_end_date, wo.actual_start_date, wo.actual_end_date "
             "FROM `tabWork Order` wo "
             "LEFT JOIN `tabWork Order Item` woi ON woi.parent = wo.name "
@@ -239,12 +241,78 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
         if not wo_names:
             return []
         return safe_sql(
-            "SELECT name, status, work_order, operation, workstation "
+            "SELECT name, status, work_order, operation, workstation, for_quantity, total_completed_qty, process_loss_qty "
             "FROM `tabJob Card` "
             "WHERE work_order IN %(wo)s "
             "ORDER BY modified DESC LIMIT 4000",
             {"wo": tuple(wo_names)}
         )
+
+
+    def get_daily_production_from_job_cards(wo_names):
+        if not wo_names:
+            return []
+
+        rows = safe_sql(
+            "SELECT "
+            "jctl.employee AS employee, "
+            "wo.production_item AS item_code, "
+            "SUM(IFNULL(jctl.completed_qty, 0)) AS completed_qty, "
+            "SUM(IFNULL(jctl.time_in_mins, 0)) AS time_in_mins, "
+            "MIN(jctl.from_time) AS from_time, "
+            "MAX(jctl.to_time) AS to_time "
+            "FROM `tabJob Card Time Log` jctl "
+            "JOIN `tabJob Card` jc ON jc.name = jctl.parent "
+            "LEFT JOIN `tabWork Order` wo ON wo.name = jc.work_order "
+            "WHERE jc.work_order IN %(wo)s AND IFNULL(jctl.completed_qty, 0) > 0 "
+            "GROUP BY DATE(jctl.from_time), jctl.employee, wo.production_item "
+            "ORDER BY DATE(jctl.from_time) DESC, wo.production_item ASC, jctl.employee ASC",
+            {"wo": tuple(wo_names)},
+        )
+
+        out = []
+        for row in rows:
+            out.append(
+                {
+                    "employee": row.get("employee") or "",
+                    "item_code": row.get("item_code") or "",
+                    "completed_qty": to_float(row.get("completed_qty")),
+                    "time_in_mins": to_float(row.get("time_in_mins")),
+                    "from_time": fmt_date(row.get("from_time")),
+                    "to_time": fmt_date(row.get("to_time")),
+                }
+            )
+        return out
+
+
+    def get_time_logs_for_job_cards(job_card_names):
+        if not job_card_names:
+            return {}
+
+        rows = safe_sql(
+            "SELECT parent AS job_card, employee, from_time, to_time, "
+            "IFNULL(time_in_mins, 0) AS time_in_mins, IFNULL(completed_qty, 0) AS completed_qty "
+            "FROM `tabJob Card Time Log` "
+            "WHERE parent IN %(jc)s "
+            "ORDER BY parent, from_time",
+            {"jc": tuple(job_card_names)},
+        )
+
+        out = {}
+        for row in rows:
+            jc = row.get("job_card")
+            if jc not in out:
+                out[jc] = []
+            out[jc].append(
+                {
+                    "employee": row.get("employee") or "",
+                    "from_time": fmt_date(row.get("from_time")),
+                    "to_time": fmt_date(row.get("to_time")),
+                    "time_in_mins": to_float(row.get("time_in_mins")),
+                    "completed_qty": to_float(row.get("completed_qty")),
+                }
+            )
+        return out
     
     
     def get_operations_for_wos(wo_names):
@@ -257,6 +325,38 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             "ORDER BY idx, modified DESC LIMIT 8000",
             {"wo": tuple(wo_names)}
         )
+
+
+    def get_jobcard_secondary_items(job_card_names):
+        if not job_card_names:
+            return {}
+
+        rows = safe_sql(
+            "SELECT parent AS job_card, item_code, source_warehouse, target_warehouse, "
+            "required_qty, consumed_qty, transferred_qty, uom "
+            "FROM `tabJob Card Item` "
+            "WHERE parent IN %(jc)s AND IFNULL(item_code, '') != '' "
+            "ORDER BY parent, idx",
+            {"jc": tuple(job_card_names)},
+        )
+
+        out = {}
+        for row in rows:
+            jc = row.get("job_card")
+            if jc not in out:
+                out[jc] = []
+            out[jc].append(
+                {
+                    "item_code": row.get("item_code") or "",
+                    "required_qty": to_float(row.get("required_qty")),
+                    "consumed_qty": to_float(row.get("consumed_qty")),
+                    "transferred_qty": to_float(row.get("transferred_qty")),
+                    "uom": row.get("uom") or "",
+                    "source_warehouse": row.get("source_warehouse") or "",
+                    "target_warehouse": row.get("target_warehouse") or "",
+                }
+            )
+        return out
     
     
     def get_wo_required_items(wo_names):
@@ -408,6 +508,10 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "production_item": w.get("production_item") or "",
                 "qty": target,
                 "produced_qty": produced,
+                "process_loss_qty": to_float(w.get("process_loss_qty")),
+                "disassembled_qty": to_float(w.get("disassembled_qty")),
+                "material_transferred_for_manufacturing": to_float(w.get("material_transferred_for_manufacturing")),
+                "additional_transferred_qty": to_float(w.get("additional_transferred_qty")),
                 "pending_qty": pending,
                 "completion_pct": pct,
                 "planned_start_date": fmt_date(w.get("planned_start_date")),
@@ -430,6 +534,9 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
         wo_names = uniq_list([x.get("name") for x in wo])
     
         jc = get_jobcards_for_wos(wo_names)
+        job_card_names = uniq_list([x.get("name") for x in jc if x.get("name")])
+        jc_secondary_items = get_jobcard_secondary_items(job_card_names)
+        jc_time_logs = get_time_logs_for_job_cards(job_card_names)
         ops = get_operations_for_wos(wo_names)
         wo_items = get_wo_required_items(wo_names)
     
@@ -438,6 +545,8 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             w = r.get("work_order")
             if w not in jc_by_wo:
                 jc_by_wo[w] = []
+            r["secondary_items"] = jc_secondary_items.get(r.get("name") or "") or []
+            r["time_logs"] = jc_time_logs.get(r.get("name") or "") or []
             jc_by_wo[w].append(r)
     
         ops_by_wo = {}
@@ -455,6 +564,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             wo_items_by_wo[w].append(r)
     
         emp_logs = get_employee_logs_for_wos(wo_names)
+        daily_production = get_daily_production_from_job_cards(wo_names)
         emp_summary_map = employee_summary_by_wo(emp_logs)
     
         emp_logs_by_wo = {}
@@ -515,6 +625,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
     
         return {
             "tree": tree,
+            "daily_production": daily_production,
             "totals": {
                 "total_qty": total_qty,
                 "produced_qty": total_produced,
@@ -523,6 +634,110 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "delayed_work_orders": delayed_count
             }
         }
+
+
+    def get_fg_production_summary(so, production_tree):
+        so_item_rows = safe_sql(
+            "SELECT item_code, SUM(IFNULL(qty, 0)) AS so_qty "
+            "FROM `tabSales Order Item` "
+            "WHERE parent = %(so)s "
+            "GROUP BY item_code",
+            {"so": so},
+        )
+        so_qty_map = {row.get("item_code"): to_float(row.get("so_qty")) for row in so_item_rows if row.get("item_code")}
+
+        summary = {}
+
+        def ensure_row(item):
+            if not item:
+                return None
+            if item not in summary:
+                summary[item] = {
+                    "item_code": item,
+                    "so_qty": to_float(so_qty_map.get(item)),
+                    "pp_qty": 0,
+                    "wo_qty": 0,
+                    "jc_qty": 0,
+                    "completed_qty": 0,
+                    "wastage_qty": 0,
+                    "pp_total": 0,
+                    "pp_done": 0,
+                    "wo_total": 0,
+                    "wo_done": 0,
+                    "jc_total": 0,
+                    "jc_done": 0,
+                }
+            return summary[item]
+
+        for node in production_tree or []:
+            pp = (node or {}).get("production_plan") or {}
+            pp_status = str(pp.get("status") or "").lower()
+            wos = (node or {}).get("work_orders") or []
+            for wo in wos:
+                item = (wo or {}).get("production_item") or ""
+                row = ensure_row(item)
+                if not row:
+                    continue
+                row["pp_total"] = row["pp_total"] + 1
+                if "complete" in pp_status or "close" in pp_status:
+                    row["pp_done"] = row["pp_done"] + 1
+
+                row["wo_total"] = row["wo_total"] + 1
+                wo_status = str((wo or {}).get("status") or "").lower()
+                if "complete" in wo_status or "close" in wo_status:
+                    row["wo_done"] = row["wo_done"] + 1
+
+                row["wo_qty"] = to_float(row.get("wo_qty")) + to_float((wo or {}).get("qty"))
+                row["completed_qty"] = to_float(row.get("completed_qty")) + to_float((wo or {}).get("produced_qty"))
+                row["wastage_qty"] = to_float(row.get("wastage_qty")) + to_float((wo or {}).get("process_loss_qty"))
+
+                for jc in (wo or {}).get("job_cards") or []:
+                    row["jc_total"] = row["jc_total"] + 1
+                    jc_status = str((jc or {}).get("status") or "").lower()
+                    if "complete" in jc_status or "close" in jc_status:
+                        row["jc_done"] = row["jc_done"] + 1
+                    row["jc_qty"] = to_float(row.get("jc_qty")) + to_float((jc or {}).get("for_quantity"))
+                    row["wastage_qty"] = to_float(row.get("wastage_qty")) + to_float((jc or {}).get("process_loss_qty"))
+
+        out = list(summary.values())
+        out.sort(key=lambda x: (x.get("item_code") or ""))
+        return out
+
+
+    def get_item_po_detail_rows(so, item):
+        item = (item or "").strip()
+        if not so or not item:
+            return []
+
+        rows = safe_sql(
+            "SELECT po.name AS purchase_order, po.supplier, po.status, "
+            "SUM(IFNULL(poi.qty, 0)) AS qty, SUM(IFNULL(poi.received_qty, 0)) AS received_qty "
+            "FROM `tabPurchase Order` po "
+            "JOIN `tabPurchase Order Item` poi ON poi.parent = po.name "
+            "WHERE po.docstatus != 2 AND poi.sales_order = %(so)s AND poi.item_code = %(item)s "
+            "GROUP BY po.name, po.supplier, po.status "
+            "ORDER BY po.transaction_date DESC, po.modified DESC",
+            {"so": so, "item": item},
+        )
+
+        out = []
+        for row in rows:
+            qty = to_float(row.get("qty"))
+            rec = to_float(row.get("received_qty"))
+            pending = qty - rec
+            if pending < 0:
+                pending = 0
+            out.append(
+                {
+                    "purchase_order": row.get("purchase_order") or "",
+                    "supplier": row.get("supplier") or "",
+                    "status": row.get("status") or "",
+                    "qty": qty,
+                    "received_qty": rec,
+                    "pending_qty": pending,
+                }
+            )
+        return out
     
     
     # ---------------------------------------------------------
@@ -2408,7 +2623,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
 
         if work_order_names:
             job_card_rows = safe_sql(
-                "SELECT name, status, work_order, operation, workstation "
+                "SELECT name, status, work_order, operation, workstation, for_quantity, total_completed_qty, process_loss_qty "
                 "FROM `tabJob Card` "
                 "WHERE work_order IN %(wo)s "
                 "ORDER BY modified DESC LIMIT 4000",
@@ -2437,6 +2652,9 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                     "work_order": row.get("work_order") or "",
                     "operation": row.get("operation") or "",
                     "workstation": row.get("workstation") or "",
+                    "for_quantity": to_float(row.get("for_quantity")),
+                    "total_completed_qty": to_float(row.get("total_completed_qty")),
+                    "process_loss_qty": to_float(row.get("process_loss_qty")),
                 }
             )
 
@@ -2667,6 +2885,8 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
     # ---------------------------------------------------------
     if action == "doc_items":
         frappe.response["message"] = get_document_items(doc_doctype, doc_name)
+    elif action == "item_po_detail":
+        frappe.response["message"] = get_item_po_detail_rows(sales_order, item_code)
     
     elif not sales_order:
         frappe.response["message"] = {
@@ -2709,6 +2929,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
     
         sync_item_po_status_from_live(sales_order)
         prod = build_production_tree_and_totals(sales_order)
+        fg_production_summary = get_fg_production_summary(sales_order, prod.get("tree") or [])
         bom_tree = get_bom_tree(sales_order)
         profit_data = get_profit_summary_and_items(sales_order)
         labour_data = get_employee_item_wise_labour_cost(sales_order)
@@ -2717,6 +2938,8 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
         frappe.response["message"] = {
             "stock_location": selected_stock_location,
             "production_tree": prod.get("tree") or [],
+            "daily_production": prod.get("daily_production") or [],
+            "production_fg_summary": fg_production_summary,
             "production_totals": prod.get("totals") or {
                 "total_qty": 0,
                 "produced_qty": 0,

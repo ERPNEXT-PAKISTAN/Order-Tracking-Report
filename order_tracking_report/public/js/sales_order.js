@@ -149,7 +149,7 @@ frappe.ui.form.on("Sales Order", {
     const f = frm.get_field("custom_detail_status");
     if (!f) return;
 
-    const currentLocation = (frm.__connection_stock_location || "").trim();
+    const currentLocation = (frm.__connection_stock_location || "Stores - AH").trim();
     f.$wrapper.html(`
       <div class="so-connection-filter" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:10px;">
         <div data-field="stock_location" style="min-width:260px;"></div>
@@ -177,7 +177,7 @@ frappe.ui.form.on("Sales Order", {
     });
 
     f.$wrapper.find('[data-action="clear-stock-location"]').off("click").on("click", () => {
-      frm.__connection_stock_location = "";
+      frm.__connection_stock_location = "Stores - AH";
       frm.trigger("render_execution_dashboard");
     });
 
@@ -519,6 +519,13 @@ return `
   .so-summary-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
   .so-summary-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:#eef2ff;color:#1e293b;font-size:11px;font-weight:800;white-space:nowrap;}
   .so-summary-chip.kpi{background:#f1f5f9;}
+  .so-prod-pp-head{background:linear-gradient(90deg,#ecfeff,#dbeafe);border:1px solid #bfdbfe;border-radius:10px;padding:2px 8px;color:#0c4a6e;display:inline-flex;align-items:center;gap:6px;}
+  .so-prod-wo-head{background:linear-gradient(90deg,#fff7ed,#ffedd5);border:1px solid #fed7aa;border-radius:10px;padding:2px 8px;color:#9a3412;display:inline-flex;align-items:center;gap:6px;}
+  .so-wo-highlight{border:1px solid #bfdbfe;border-radius:12px;background:linear-gradient(90deg,#f8fbff,#eef6ff);padding:10px 12px;}
+  .so-wo-metric-card{border:1px solid #c7d2fe;border-radius:12px;padding:10px 12px;background:#f8faff;}
+  .so-wo-metric-card .cap{font-size:12px;color:#475569;}
+  .so-wo-metric-card .val{font-size:24px;line-height:1.1;font-weight:900;color:#1e3a8a;}
+  .so-wo-metric-strip{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-top:8px;}
 </style>`;
 }
 
@@ -683,15 +690,32 @@ function jobCardTable(rows, itemCode){
       <td>${badge(r.status)}</td>
       <td class="muted">${esc(r.operation||"")}</td>
       <td class="muted">${esc(r.workstation||"")}</td>
+      <td style="text-align:right;">${soFlt(r.for_quantity || 0)}</td>
+      <td style="text-align:right;">${soFlt(r.total_completed_qty || 0)}</td>
+      <td style="text-align:right;">${soFlt(r.process_loss_qty || 0)}</td>
       <td>${actionButtons(r)}</td>
     </tr>
-  `).join("") : `<tr><td colspan="5" class="text-muted">No Job Cards.</td></tr>`;
+  `).join("") : `<tr><td colspan="8" class="text-muted">No Job Cards.</td></tr>`;
   return `<div class="table-responsive">
     <table class="table table-bordered so-table" style="margin:0;">
-      <thead><tr><th style="width:220px;">Job Card</th><th style="width:140px;">Status</th><th>Operation</th><th>Workstation</th><th style="width:280px;">Actions</th></tr></thead>
+      <thead><tr><th style="width:220px;">Job Card</th><th style="width:140px;">Status</th><th>Operation</th><th>Workstation</th><th style="width:120px;text-align:right;">Qty to Mfg</th><th style="width:120px;text-align:right;">Completed Qty</th><th style="width:120px;text-align:right;">Loss Qty</th><th style="width:280px;">Actions</th></tr></thead>
       <tbody>${body}</tbody>
     </table>
   </div>`;
+}
+
+function jobCardSecondaryItemsTable(rows){
+  rows = rows || [];
+  const body = rows.length ? rows.map((r) => `
+    <tr>
+      <td>${esc(r.item_code || "")}</td>
+      <td style="text-align:right;">${soFlt(r.required_qty || 0)}</td>
+      <td style="text-align:right;">${soFlt(r.consumed_qty || 0)}</td>
+      <td style="text-align:right;">${soFlt(r.transferred_qty || 0)}</td>
+      <td>${esc(r.uom || "")}</td>
+    </tr>
+  `).join("") : `<tr><td colspan="5" class="text-muted">No secondary items.</td></tr>`;
+  return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;"><thead><tr><th>Scrap / Secondary Item</th><th style="text-align:right;">Required</th><th style="text-align:right;">Consumed</th><th style="text-align:right;">Transferred</th><th>UOM</th></tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 function operationTable(rows){
@@ -849,41 +873,50 @@ function productionTree(tree){
     const wos = ppNode.work_orders || [];
     const keyPP = `pp_${i}_${pp.name}`;
 
-    html += toggleHeader(`Production Plan: ${esc(pp.name)}`, `${badge(pp.status)} • ${wos.length} WO`, keyPP);
+    html += toggleHeader(`<span class="so-prod-pp-head">Production Plan: ${esc(pp.name)}</span>`, `${badge(pp.status)} • ${wos.length} WO`, keyPP);
 
     let woh = "";
     wos.forEach((wo,j)=>{
       const keyWO = `wo_${i}_${j}_${wo.name}`;
 
       const top = `
-        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+        <div class="so-wo-highlight" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
           <div>
             <div style="font-weight:900;font-size:13px;">${docLink("Work Order", wo.name)}</div>
             <div class="muted">Item: ${esc(wo.production_item||"")}</div>
             <div class="muted">Plan: ${esc(fmtDT(wo.planned_start_date))} → ${esc(fmtDT(wo.planned_end_date))}</div>
             ${wo.is_delayed ? `<div class="so-danger">Delayed Work Order</div>` : ``}
             <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
-              <button class="btn btn-xs btn-warning" data-plan-action="mt" data-item="${esc(wo.production_item || "")}">Material Transfer</button>
-              <button class="btn btn-xs btn-primary" data-plan-action="mfg" data-item="${esc(wo.production_item || "")}">Manufacture</button>
-              <button class="btn btn-xs btn-success" data-plan-action="dn" data-item="${esc(wo.production_item || "")}">Delivery Note</button>
-              <button class="btn btn-xs btn-default" data-plan-action="view" data-item="${esc(wo.production_item || "")}">Manage Docs</button>
+              <button class="btn btn-xs btn-primary" data-plan-action="ac" data-item="${esc(wo.production_item || "")}">Action Center</button>
             </div>
           </div>
-          <div style="text-align:right;min-width:230px;">
+          <div class="so-wo-metric-card" style="text-align:right;min-width:230px;">
             <div>${badge(wo.status)}</div>
-            <div class="muted" style="margin-top:6px;">
-              Total <b>${soFlt(wo.qty)}</b> • Done <b>${soFlt(wo.produced_qty)}</b> • Pending <b>${soFlt(wo.pending_qty)}</b>
+            <div class="cap" style="margin-top:6px;">Qty</div>
+            <div class="val">${soFlt(wo.qty)}</div>
+            <div class="so-wo-metric-strip">
+              <span class="so-summary-chip">Done <b>${soFlt(wo.produced_qty)}</b></span>
+              <span class="so-summary-chip">Wastage <b>${soFlt(wo.process_loss_qty || 0)}</b></span>
+              <span class="so-summary-chip">Pending <b>${soFlt(wo.pending_qty)}</b></span>
+              <span class="so-summary-chip">Transfer <b>${soFlt(wo.material_transferred_for_manufacturing || 0)}</b></span>
+              <span class="so-summary-chip">Extra <b>${soFlt(wo.additional_transferred_qty || 0)}</b></span>
+              <span class="so-summary-chip">Disassembled <b>${soFlt(wo.disassembled_qty || 0)}</b></span>
             </div>
             <div style="margin-top:8px;">${progressBar(wo.completion_pct)}</div>
           </div>
         </div>
       `;
 
-      woh += toggleHeader(`Work Order: ${esc(wo.name)}`, `Qty ${soFlt(wo.qty)} • Done ${soFlt(wo.produced_qty)} • ${esc(wo.completion_pct||0)}%`, keyWO);
+      const jcDone = (wo.job_cards || []).reduce((a, j) => a + Number(j.total_completed_qty || 0), 0);
+      const jcLoss = (wo.job_cards || []).reduce((a, j) => a + Number(j.process_loss_qty || 0), 0);
+      woh += toggleHeader(`<span class="so-prod-wo-head">Work Order: ${esc(wo.name)}</span>`, `Qty ${soFlt(wo.qty)} • Done ${soFlt(wo.produced_qty)} • Loss ${soFlt((wo.process_loss_qty || 0) + jcLoss)} • ${esc(wo.completion_pct||0)}%`, keyWO);
       woh += panel(`
         ${top}
         <div style="margin-top:12px;font-weight:900;">Job Cards</div>
         ${jobCardTable(wo.job_cards||[], wo.production_item || "")}
+        <div style="margin-top:8px;" class="muted">Job Card Completed Qty: <b>${soFlt(jcDone)}</b> • Job Card Loss Qty: <b>${soFlt(jcLoss)}</b></div>
+        <div style="margin-top:12px;font-weight:900;">Job Card Secondary Items (Scrap)</div>
+        ${jobCardSecondaryItemsTable((wo.job_cards||[]).reduce((acc, jc) => acc.concat(jc.secondary_items || []), []))}
         <div style="margin-top:12px;font-weight:900;">Operations</div>
         ${operationTable(wo.operations||[])}
         <div style="margin-top:12px;font-weight:900;">Work Order Items (Materials)</div>
@@ -2304,6 +2337,7 @@ function ensure_update_items_button(frm) {
 // Final UI overrides (latest requested behavior)
 function _int(v) { return Math.round(Number(v || 0)); }
 function _n0(v) { return _int(v).toLocaleString(); }
+function _n2(v) { return Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function _money0(v) {
   try { return format_currency(_int(v || 0), null, 0); } catch (e) { return _n0(v); }
 }
@@ -3416,7 +3450,7 @@ function materialShortageTable(rows){
       if (shortageQty <= 0) shortageQty = 1;
       body += `
         <tr data-panel="${esc(key)}" style="display:none;">
-          <td style="padding-left:26px;width:13%;min-width:140px;">${esc(r.item_code || "")}</td>
+          <td style="padding-left:26px;width:13%;min-width:140px;"><a href="#" data-ms-item-detail="1" data-item="${esc(r.item_code || "")}" style="font-weight:700;">${esc(r.item_code || "")}</a></td>
           <td style="text-align:right;">${(Number(r.qty_per_bom || 0)).toFixed(2)}</td>
           <td style="text-align:right;">${_n0(r.required_qty)}</td>
           <td style="text-align:right;">${_n0(r.wastage_qty || 0)}</td>
@@ -3497,14 +3531,44 @@ function _planningRows(frm, data){
     ((ppNode || {}).work_orders || []).forEach((wo) => {
       const k = String((wo.production_item || wo.item_code || wo.item_name || "")).trim();
       if (!k) return;
-      if (!itemMap[k]) itemMap[k] = { pp: [], pp_statuses: [], wo: [], wo_statuses: [], jc: [], jc_statuses: [] };
+      if (!itemMap[k]) itemMap[k] = { pp: [], pp_statuses: [], wo: [], wo_statuses: [], jc: [], jc_statuses: [], wo_completed_qty: 0, jc_completed_qty: 0, wo_details: [], wo_seen: {}, jc_details: [], jc_seen: {} };
       if (ppName && itemMap[k].pp.indexOf(ppName) === -1) itemMap[k].pp.push(ppName);
       if (ppStatus) itemMap[k].pp_statuses.push(ppStatus);
       if (wo.name && itemMap[k].wo.indexOf(wo.name) === -1) itemMap[k].wo.push(wo.name);
       if (wo.status) itemMap[k].wo_statuses.push(wo.status);
+      itemMap[k].wo_completed_qty = Number(itemMap[k].wo_completed_qty || 0) + Number(wo.produced_qty || 0);
+      if (wo.name && !itemMap[k].wo_seen[wo.name]) {
+        itemMap[k].wo_seen[wo.name] = 1;
+        itemMap[k].wo_details.push({
+          name: wo.name || "",
+          status: wo.status || "",
+          qty: Number(wo.qty || 0),
+          produced_qty: Number(wo.produced_qty || 0),
+          process_loss_qty: Number(wo.process_loss_qty || 0),
+          disassembled_qty: Number(wo.disassembled_qty || 0),
+          material_transferred_for_manufacturing: Number(wo.material_transferred_for_manufacturing || 0),
+          additional_transferred_qty: Number(wo.additional_transferred_qty || 0),
+          pending_qty: Number(wo.pending_qty || 0),
+          completion_pct: Number(wo.completion_pct || 0),
+        });
+      }
       (wo.job_cards || []).forEach((jc) => {
         if (jc.name && itemMap[k].jc.indexOf(jc.name) === -1) itemMap[k].jc.push(jc.name);
         if (jc.status) itemMap[k].jc_statuses.push(jc.status);
+        itemMap[k].jc_completed_qty = Number(itemMap[k].jc_completed_qty || 0) + Number(jc.total_completed_qty || 0);
+        if (jc.name && !itemMap[k].jc_seen[jc.name]) {
+          itemMap[k].jc_seen[jc.name] = 1;
+          itemMap[k].jc_details.push({
+            name: jc.name || "",
+            status: jc.status || "",
+            work_order: jc.work_order || wo.name || "",
+            for_quantity: Number(jc.for_quantity || 0),
+            total_completed_qty: Number(jc.total_completed_qty || 0),
+            process_loss_qty: Number(jc.process_loss_qty || 0),
+            time_logs: Array.isArray(jc.time_logs) ? jc.time_logs : [],
+            secondary_items: Array.isArray(jc.secondary_items) ? jc.secondary_items : [],
+          });
+        }
       });
     });
   });
@@ -3524,7 +3588,7 @@ function _planningRows(frm, data){
 
   return sourceRows.map((r, idx) => {
     const k = String(r.item_code || r.item_name || "").trim();
-    const m = itemMap[k] || { pp: [], pp_statuses: [], wo: [], wo_statuses: [], jc: [], jc_statuses: [] };
+    const m = itemMap[k] || { pp: [], pp_statuses: [], wo: [], wo_statuses: [], jc: [], jc_statuses: [], wo_completed_qty: 0, jc_completed_qty: 0, wo_details: [], jc_details: [] };
     const ppList = Array.from(new Set([...(r.pp_list || []), ...(m.pp || [])].filter(Boolean)));
     const ppStatuses = Array.from(new Set([...(r.pp_statuses || []), ...(m.pp_statuses || [])].filter(Boolean)));
     const woList = Array.from(new Set([...(r.wo_list || []), ...(m.wo || [])].filter(Boolean)));
@@ -3543,6 +3607,10 @@ function _planningRows(frm, data){
       wo_statuses: woStatuses,
       jc_list: m.jc,
       jc_statuses: m.jc_statuses,
+      wo_completed_qty: Number(m.wo_completed_qty || 0),
+      jc_completed_qty: Number(m.jc_completed_qty || 0),
+      wo_details: (m.wo_details || []).slice(),
+      jc_details: (m.jc_details || []).slice(),
     };
   });
 }
@@ -3566,35 +3634,43 @@ function _docStatusCell(doctype, names, statuses) {
   return `${links}<div style="margin-top:4px;">${_statusChip(true, done)}</div>`;
 }
 
+function _planningJcQtyCell(r){
+  const list = Array.isArray(r.jc_details) ? r.jc_details : [];
+  if (!list.length) return `<span class="text-muted">-</span>`;
+  const lines = list.map((x) => `<div>${docLink("Job Card", x.name || "")} - <b>${_n0(x.total_completed_qty || 0)}</b></div>`).join("");
+  return `${lines}<div style="margin-top:6px;"><button class="btn btn-xs btn-default" data-plan-jc-detail="1" data-item="${esc(r.item_code || "")}">View Details</button></div>`;
+}
+
+function _planningWoQtyCell(r){
+  const list = Array.isArray(r.wo_details) ? r.wo_details : [];
+  const val = _n0(r.wo_completed_qty || 0);
+  if (!list.length) return `<span>${val}</span>`;
+  return `<div><b>${val}</b></div><div style="margin-top:6px;"><button class="btn btn-xs btn-default" data-plan-wo-detail="1" data-item="${esc(r.item_code || "")}">View Details</button></div>`;
+}
+
 function salesOrderItemsPlanningTable(frm, data){
   const rows = _planningRows(frm, data);
   const body = rows.length ? rows.map((r) => {
     return `
       <tr>
-        <td style="text-align:center;">${r.idx}</td>
         <td style="min-width:210px;"><b>${esc(r.item_name)}</b><div class="muted">${esc(r.item_code)}</div></td>
-        <td style="text-align:right;">${_n0(r.ordered_qty)}</td>
-        <td style="text-align:right;">${_n0(r.delivered_qty)}</td>
-        <td style="text-align:right;">${_n0(r.pending_qty)}</td>
         <td>${_docStatusCell("Production Plan", r.pp_list, r.pp_statuses)}</td>
         <td>${_docStatusCell("Work Order", r.wo_list, r.wo_statuses)}</td>
         <td>${_docStatusCell("Job Card", r.jc_list, r.jc_statuses)}</td>
+        <td style="text-align:right;">${_n0(r.ordered_qty)}</td>
+        <td style="text-align:right;">${_n0(r.delivered_qty)}</td>
+        <td style="text-align:right;">${_n0(r.pending_qty)}</td>
+        <td style="text-align:right;">${_planningWoQtyCell(r)}</td>
+        <td>${_planningJcQtyCell(r)}</td>
         <td style="white-space:nowrap;">
-          <button class="btn btn-xs btn-info" data-plan-action="pp" data-item="${esc(r.item_code)}">PP</button>
-          <button class="btn btn-xs btn-dark" data-plan-action="wo" data-item="${esc(r.item_code)}">WO</button>
-          <button class="btn btn-xs btn-secondary" data-plan-action="jc" data-item="${esc(r.item_code)}">JC</button>
-          <button class="btn btn-xs btn-warning" data-plan-action="mt" data-item="${esc(r.item_code)}">MT</button>
-          <button class="btn btn-xs btn-secondary" data-plan-action="mfg" data-item="${esc(r.item_code)}">MFG</button>
-          <button class="btn btn-xs btn-success" data-plan-action="dn" data-item="${esc(r.item_code)}">DN</button>
-          <button class="btn btn-xs btn-success" data-plan-action="si" data-item="${esc(r.item_code)}">SI</button>
-          <button class="btn btn-xs btn-primary" data-plan-action="links" data-item="${esc(r.item_code)}">Links</button>
+          <button class="btn btn-xs btn-primary" data-plan-action="ac" data-item="${esc(r.item_code)}">Action Center</button>
         </td>
       </tr>
     `;
-  }).join("") : `<tr><td colspan="9" class="text-muted">No item planning rows found.</td></tr>`;
+  }).join("") : `<tr><td colspan="10" class="text-muted">No item planning rows found.</td></tr>`;
 
   return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;">
-    <thead><tr><th style="width:44px;">#</th><th style="min-width:210px;">Item</th><th style="text-align:right;">Ordered Qty</th><th style="text-align:right;">Delivered</th><th style="text-align:right;">Pending</th><th>Production Plan</th><th>Work Order</th><th>Job Card</th><th>Actions</th></tr></thead>
+    <thead><tr><th style="min-width:210px;">Item</th><th>Production Plan</th><th>Work Order</th><th>Job Card</th><th style="text-align:right;">Order Qty</th><th style="text-align:right;">Delivered</th><th style="text-align:right;">Pending</th><th style="text-align:right;">WO Completed Qty</th><th style="text-align:right;">JC Completed Qty</th><th>Actions</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 
@@ -3665,6 +3741,43 @@ function manufacturingControlCenter(frm, data){
   `;
 }
 
+function fgSummaryTable(rows){
+  const list = rows || [];
+  const body = list.length ? list.map((r) => `
+    <tr>
+      <td><b>${esc(r.item_code || "-")}</b></td>
+      <td style="text-align:right;">${_n0(r.so_qty || 0)}</td>
+      <td style="text-align:right;">${_n0(r.pp_qty || 0)}</td>
+      <td style="text-align:right;">${_n0(r.wo_qty || 0)}</td>
+      <td style="text-align:right;">${_n0(r.jo_qty || 0)}</td>
+      <td style="text-align:right;color:#166534;font-weight:800;">${_n0(r.completed_qty || 0)}</td>
+      <td style="text-align:right;color:#b45309;font-weight:800;">${_n0(r.wastage_qty || 0)}</td>
+    </tr>
+  `).join("") : `<tr><td colspan="7" class="text-muted">No FG production summary available.</td></tr>`;
+
+  return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;">
+    <thead><tr><th>FG Item</th><th style="text-align:right;">SO Qty</th><th style="text-align:right;">PP Qty</th><th style="text-align:right;">WO Qty</th><th style="text-align:right;">JO Qty</th><th style="text-align:right;">Completed Qty</th><th style="text-align:right;">Wastage Qty</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+
+function dailyProductionTable(rows){
+  const list = (rows || []).filter((r) => Number(r.completed_qty || 0) > 0);
+  const body = list.length ? list.map((r) => `
+    <tr>
+      <td>${esc(fmtDT(r.from_time || "") || "-")}</td>
+      <td>${esc(fmtDT(r.to_time || "") || "-")}</td>
+      <td>${esc(r.employee || "-")}</td>
+      <td>${esc(r.item_code || "-")}</td>
+      <td style="text-align:right;">${_n0(r.completed_qty || 0)}</td>
+      <td style="text-align:right;">${_n2(Number(r.time_in_mins || 0) / 60)}</td>
+    </tr>
+  `).join("") : `<tr><td colspan="6" class="text-muted">No daily production rows with completed quantity greater than zero.</td></tr>`;
+
+  return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;">
+    <thead><tr><th>From Time</th><th>To Time</th><th>Employee</th><th>Item</th><th style="text-align:right;">Completed Qty</th><th style="text-align:right;">Hours</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+
 function bindDashboardActionButtons($wrap, frm, data){
   const planningRows = _planningRows(frm, data || {});
   const itemDocumentLinks = Array.isArray((data || {}).item_document_links) ? data.item_document_links : [];
@@ -3689,6 +3802,88 @@ function bindDashboardActionButtons($wrap, frm, data){
   const getItemSummary = (selectedItem) => orderItemSummaryRows.find((row) => String((row && row.item_code) || "").trim() === String(selectedItem || "").trim()) || null;
   const getSalesOrderRow = (selectedItem) => (frm.doc.items || []).find((row) => String((row.item_code || "").trim()) === String(selectedItem || "").trim()) || null;
   const getLatestRow = (rows) => (rows && rows.length ? rows[0] : null);
+  const getPlanningRow = (selectedItem) => planningRows.find((row) => String((row.item_code || "")).trim() === String(selectedItem || "").trim()) || null;
+
+  const openWoCompletedDetails = (selectedItem) => {
+    const row = getPlanningRow(selectedItem);
+    const list = (row && row.wo_details) ? row.wo_details : [];
+    const d = new frappe.ui.Dialog({
+      title: __("Work Order Completion Details - {0}", [selectedItem || "Item"]),
+      size: "large",
+      fields: [{ fieldtype: "HTML", fieldname: "body" }],
+    });
+    const body = list.length ? list.map((w) => `
+      <tr>
+        <td>${w.name ? docLink("Work Order", w.name) : "-"}</td>
+        <td>${esc(w.status || "")}</td>
+        <td style="text-align:right;">${_n0(w.qty || 0)}</td>
+        <td style="text-align:right;">${_n0(w.produced_qty || 0)}</td>
+        <td style="text-align:right;">${_n0(w.process_loss_qty || 0)}</td>
+        <td style="text-align:right;">${_n0(w.disassembled_qty || 0)}</td>
+        <td style="text-align:right;">${_n0(w.material_transferred_for_manufacturing || 0)}</td>
+        <td style="text-align:right;">${_n0(w.additional_transferred_qty || 0)}</td>
+        <td style="text-align:right;">${_n0(w.pending_qty || 0)}</td>
+      </tr>
+    `).join("") : `<tr><td colspan="9" class="text-muted">No Work Order details found.</td></tr>`;
+
+    d.fields_dict.body.$wrapper.html(`<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;"><thead><tr><th>Work Order</th><th>Status</th><th style="text-align:right;">Qty To Manufacture</th><th style="text-align:right;">Produced Qty</th><th style="text-align:right;">Process Loss Qty</th><th style="text-align:right;">Disassembled Qty</th><th style="text-align:right;">Material Transfer Qty</th><th style="text-align:right;">Additional Transfer Qty</th><th style="text-align:right;">Pending Qty</th></tr></thead><tbody>${body}</tbody></table></div>`);
+    d.show();
+  };
+
+  const openJcCompletedDetails = (selectedItem) => {
+    const row = getPlanningRow(selectedItem);
+    const list = (row && row.jc_details) ? row.jc_details : [];
+    const d = new frappe.ui.Dialog({
+      title: __("Job Card Completion Details - {0}", [selectedItem || "Item"]),
+      size: "extra-large",
+      fields: [{ fieldtype: "HTML", fieldname: "body" }],
+    });
+
+    const body = list.length ? list.map((jc) => {
+      const logs = (jc.time_logs || []).filter((x) => Number(x.completed_qty || 0) > 0);
+      const logsBody = logs.length ? logs.map((x) => `
+        <tr>
+          <td>${esc(x.employee || "")}</td>
+          <td>${esc(fmtDT(x.from_time || "") || "-")}</td>
+          <td>${esc(fmtDT(x.to_time || "") || "-")}</td>
+          <td style="text-align:right;">${_n0(x.completed_qty || 0)}</td>
+          <td style="text-align:right;">${_n2(Number(x.time_in_mins || 0) / 60)}</td>
+        </tr>
+      `).join("") : `<tr><td colspan="5" class="text-muted">No time logs with completed qty > 0.</td></tr>`;
+
+      const sec = jc.secondary_items || [];
+      const secBody = sec.length ? sec.map((s) => `
+        <tr>
+          <td>${esc(s.item_code || "")}</td>
+          <td style="text-align:right;">${_n0(s.required_qty || 0)}</td>
+          <td style="text-align:right;">${_n0(s.consumed_qty || 0)}</td>
+          <td style="text-align:right;">${_n0(s.transferred_qty || 0)}</td>
+          <td>${esc(s.uom || "")}</td>
+        </tr>
+      `).join("") : `<tr><td colspan="5" class="text-muted">No secondary/scrap items.</td></tr>`;
+
+      return `
+        <div style="border:1px solid #dbeafe;border-radius:12px;padding:10px;margin-bottom:10px;background:#f8fbff;">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;">
+            <div><b>${jc.name ? docLink("Job Card", jc.name) : "-"}</b> <span class="muted">(WO: ${jc.work_order ? docLink("Work Order", jc.work_order) : "-"})</span></div>
+            <div>${badge(jc.status || "-")}</div>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+            <span class="so-summary-chip">Qty To Manufacture <b>${_n0(jc.for_quantity || 0)}</b></span>
+            <span class="so-summary-chip">Completed Qty <b>${_n0(jc.total_completed_qty || 0)}</b></span>
+            <span class="so-summary-chip">Process Loss Qty <b>${_n0(jc.process_loss_qty || 0)}</b></span>
+          </div>
+          <div style="margin-top:10px;font-weight:800;">Time Logs</div>
+          <div class="table-responsive"><table class="table table-bordered so-table" style="margin:6px 0 0 0;"><thead><tr><th>Employee</th><th>From Time</th><th>To Time</th><th style="text-align:right;">Completed Qty</th><th style="text-align:right;">Hours</th></tr></thead><tbody>${logsBody}</tbody></table></div>
+          <div style="margin-top:10px;font-weight:800;">Secondary / Scrap Items</div>
+          <div class="table-responsive"><table class="table table-bordered so-table" style="margin:6px 0 0 0;"><thead><tr><th>Item</th><th style="text-align:right;">Required Qty</th><th style="text-align:right;">Consumed Qty</th><th style="text-align:right;">Transferred Qty</th><th>UOM</th></tr></thead><tbody>${secBody}</tbody></table></div>
+        </div>
+      `;
+    }).join("") : `<div class="text-muted">No Job Card details found.</div>`;
+
+    d.fields_dict.body.$wrapper.html(body);
+    d.show();
+  };
 
   const buildSeedForItem = (selectedItem) => {
     const itemCode = String(selectedItem || primaryItem || "").trim();
@@ -4722,6 +4917,7 @@ function bindDashboardActionButtons($wrap, frm, data){
   const runDirectAction = (action, selectedItem) => {
     const seed = buildSeedForItem(selectedItem);
     const itemLinks = getItemLinks(seed.item_code) || {};
+    if (action === "ac" || action === "action_center") return openActionCenterForItem(selectedItem || primaryItem, "pp");
     if (action === "show_all_links") return openAllRelatedLinksDialog(frm);
     if (action === "links") return openPlanningItemLinksDialog(frm, data, selectedItem);
     if (action === "create_sales_order" || action === "so") return openSalesOrderCreator(seed);
@@ -4773,6 +4969,20 @@ function bindDashboardActionButtons($wrap, frm, data){
     const action = $(this).attr("data-plan-action");
     const item = ($(this).attr("data-item") || "").trim();
     runDirectAction(action, item);
+  });
+
+  $wrap.find("[data-plan-wo-detail='1']").off("click").on("click", function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    const item = ($(this).attr("data-item") || "").trim();
+    openWoCompletedDetails(item);
+  });
+
+  $wrap.find("[data-plan-jc-detail='1']").off("click").on("click", function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    const item = ($(this).attr("data-item") || "").trim();
+    openJcCompletedDetails(item);
   });
 
   $wrap.find("[data-jc-action]").off("click").on("click", function(e) {
@@ -4913,6 +5123,45 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
       select_for_po: 1,
     });
   });
+
+  $wrap.find("[data-ms-item-detail='1']").off("click").on("click", function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    const item = ($(this).attr("data-item") || "").trim();
+    if (!item) return;
+
+    frappe.call({
+      method: "order_tracking_report.api.custom_so_execution_status",
+      args: {
+        sales_order: frm.doc.name,
+        action: "item_po_detail",
+        item_code: item,
+      },
+      freeze: true,
+      freeze_message: __("Loading item purchase orders..."),
+      callback: (r) => {
+        const rows = (r && r.message) ? r.message : [];
+        const d = new frappe.ui.Dialog({
+          title: __("Purchase Orders for {0}", [item]),
+          size: "large",
+          fields: [{ fieldtype: "HTML", fieldname: "body" }],
+        });
+
+        const body = rows.length ? rows.map((x) => `
+          <tr>
+            <td>${x.purchase_order ? docLink("Purchase Order", x.purchase_order) : "-"}</td>
+            <td>${esc(x.supplier || "")}</td>
+            <td style="text-align:right;">${_n0(x.qty || 0)}</td>
+            <td style="text-align:right;">${_n0(x.received_qty || 0)}</td>
+            <td style="text-align:right;">${_n0(x.pending_qty || 0)}</td>
+          </tr>
+        `).join("") : `<tr><td colspan="5" class="text-muted">No purchase orders found for this item.</td></tr>`;
+
+        d.fields_dict.body.$wrapper.html(`<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;"><thead><tr><th>PO Number</th><th>Supplier</th><th style="text-align:right;">Qty</th><th style="text-align:right;">Received Qty</th><th style="text-align:right;">Pending Qty</th></tr></thead><tbody>${body}</tbody></table></div>`);
+        d.show();
+      },
+    });
+  });
 }
 
 function buildDashboard(frm, data){
@@ -4944,6 +5193,8 @@ function buildDashboard(frm, data){
     `, false)}
 
     ${sectionBlock('production', 'Production Section', 'linear-gradient(90deg,#7a3e00,#a16207)', `
+      ${card("Finished Goods Production Summary", "SO/PP/WO/JO progress with completion and wastage", fgSummaryTable(data.production_fg_summary || []))}
+      ${card("Daily Production Report", "From Job Card time logs by date and employee", dailyProductionTable(data.daily_production || []))}
       ${card("Production Details", "Job Card / Operation / Material details", productionTree(data.production_tree||[]))}
       ${card("Production Timeline", "Work Orders, Delivery Notes and Invoices timeline", timelineView(data.gantt_timeline || []))}
       ${card("Machine Utilization", "Workstation time from Job Card Time Logs", machineUtilization(data.machine_utilization || []))}
