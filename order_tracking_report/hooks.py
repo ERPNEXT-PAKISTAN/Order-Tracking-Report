@@ -12,6 +12,75 @@ fixtures = [
 	},
 	{
 		"dt": "Custom HTML Block",
+		"filters": [["name", "in", ["Advances", "Live Work Order", "Work Order"]]],
+	},
+	{
+		"dt": "Web Page",
+		"filters": [["name", "in", ["finanicals", "per-piece-report"]]],
+	},
+	{
+		"dt": "Property Setter",
+		"filters": [["name", "in", ["Per Piece Salary-po_number-reqd", "Sales Order-main-0"]]],
+	},
+	{
+		"dt": "Print Format",
+		"filters": [["name", "in", ["Per Piece Print", "Sales Order Contract", "Sales Order Contract with Comment"]]],
+	},
+	{
+		"dt": "Client Script",
+		"filters": [["name", "in", ["Per Piece Salary Update Child"]]],
+	},
+	{
+		"dt": "Report",
+		"filters": [["name", "in", ["Per Piece Query Report Simple", "Per Piece Salary Report"]]],
+	},
+	{
+		"dt": "Server Script",
+		"filters": [["name", "in", ["Work Order", "live_production_api", "fin_sight_dashboard_api"]]],
+	},
+]
+fixtures = [
+	{
+		"dt": "Custom Field",
+		"filters": [["dt", "=", "Sales Order"]],
+	},
+	{
+		"dt": "Custom Field",
+		"filters": [
+			["dt", "in", ["Per Piece", "Item", "Salary Slip"]],
+			[
+				"fieldname",
+				"in",
+				[
+					# Per Piece (child table) – JV & payment tracking
+					"jv_status",
+					"jv_entry_no",
+					"jv_line_remark",
+					"booked_amount",
+					"paid_amount",
+					"unpaid_amount",
+					"payment_status",
+					"payment_jv_no",
+					"payment_refs",
+					"payment_line_remark",
+					"sales_order",
+					"process_size",
+					# Item – used by Overtime child table
+					"custom_working_hours",
+					"custom_target_value",
+					# Salary Slip – overtime tab & totals
+					"custom_overtime",
+					"custom_overtime_report",
+					"custom_section_break_phw71",
+					"custom_total_overtime_hours",
+					"custom_column_break_cca4z",
+					"custom_total_overtime_qty",
+				],
+			],
+		],
+	},
+	{
+		"dt": "Custom HTML Block",
 		"filters": [["name", "in", ["Live Work Order", "Work Order"]]],
 	},
 	{
@@ -28,14 +97,41 @@ fixtures = [
 	},
 	{
 		"dt": "Server Script",
-		"filters": [["name", "in", ["Work Order", "live_production_api", "fin_sight_dashboard_api"]]],
+		"filters": [
+			[
+				"name",
+				"in",
+				[
+					# Existing
+					"Work Order",
+					"live_production_api",
+					"fin_sight_dashboard_api",
+					# Per Piece Payroll
+					"create_per_piece_salary_entry",
+					"create_per_piece_salary_jv",
+					"cancel_per_piece_salary_jv",
+					"create_per_piece_salary_payment_jv",
+					"cancel_per_piece_salary_payment_jv",
+					"get_per_piece_salary_report",
+					# Overtime
+					"Get Overtime Report",
+					"Load Overtime Detail in Salary Slip (Child Table)",
+				],
+			]
+		],
+	},
+	{
+		"dt": "DocType",
+		"filters": [
+			["name", "in", ["Daily Overtime", "Overtime", "Per Piece", "Per Piece Salary"]],
+		],
 	},
 ]
 
 # Apps
 # ------------------
 
-# required_apps = []
+required_apps = ["erpnext", "hrms"]
 
 # Each item in the list will be shown as an app in the apps page
 # add_to_apps_screen = [
@@ -74,6 +170,7 @@ app_include_js = [
 # include js in doctype views
 doctype_js = {
 	"Sales Order": "public/js/sales_order.js",
+	"Salary Slip": "public/js/salary_slip.js",
 	"Purchase Order": "public/js/data_entry/purchase_order_data_entry.js",
 	"Purchase Receipt": "public/js/data_entry/purchase_receipt_data_entry.js",
 	"Purchase Invoice": "public/js/data_entry/purchase_invoice_data_entry.js",
@@ -82,6 +179,7 @@ doctype_js = {
 }
 
 after_migrate = [
+	"order_tracking_report.install.after_migrate",
 	"order_tracking_report.bootstrap.ensure_item_po_setup",
 	"order_tracking_report.bootstrap.ensure_sales_order_live_shortcuts",
 	"order_tracking_report.cleanup.remove_legacy_ui_scripts",
@@ -129,7 +227,7 @@ after_migrate = [
 # ------------
 
 # before_install = "order_tracking_report.install.before_install"
-# after_install = "order_tracking_report.install.after_install"
+after_install = "order_tracking_report.install.after_install"
 
 # Uninstallation
 # ------------
@@ -183,14 +281,18 @@ after_migrate = [
 # 	}
 # }
 doc_events = {
-	"Purchase Order": {
-		"on_update": "order_tracking_report.po_sync.sync_item_po_status_for_purchase_order",
-		"on_submit": "order_tracking_report.po_sync.sync_item_po_status_for_purchase_order",
-		"on_cancel": "order_tracking_report.po_sync.sync_item_po_status_for_purchase_order",
-	},
-	"Purchase Receipt": {
-		"validate": "order_tracking_report.cleanup.ensure_purchase_receipt_title",
-	},
+"Purchase Order": {
+"on_update": "order_tracking_report.po_sync.sync_item_po_status_for_purchase_order",
+"on_submit": "order_tracking_report.po_sync.sync_item_po_status_for_purchase_order",
+"on_cancel": "order_tracking_report.po_sync.sync_item_po_status_for_purchase_order",
+},
+"Purchase Receipt": {
+"validate": "order_tracking_report.cleanup.ensure_purchase_receipt_title",
+},
+"Per Piece Salary": {
+"validate": "order_tracking_report.per_piece_guards.protect_per_piece_salary_mutations",
+"before_update_after_submit": "order_tracking_report.per_piece_guards.protect_per_piece_salary_mutations",
+},
 }
 
 # Scheduled Tasks
