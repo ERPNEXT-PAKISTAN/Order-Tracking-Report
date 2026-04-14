@@ -165,6 +165,7 @@ def _flatten_work_order_consumption_rows(sales_orders, selected_qty_by_item=None
         JOIN `tabWork Order Item` woi ON woi.parent = wo.name
         WHERE
             wo.docstatus < 2
+            AND LOWER(IFNULL(wo.status, '')) != 'cancelled'
             AND wo.sales_order IN %(sales_orders)s
             AND IFNULL(woi.item_code, '') != ''
         GROUP BY wo.sales_order, wo.production_item, woi.item_code

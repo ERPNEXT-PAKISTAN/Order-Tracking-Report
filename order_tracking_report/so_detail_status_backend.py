@@ -218,7 +218,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             "material_transferred_for_manufacturing, additional_transferred_qty, production_plan, "
             "planned_start_date, planned_end_date, actual_start_date, actual_end_date "
             "FROM `tabWork Order` "
-            "WHERE sales_order = %(so)s "
+            "WHERE sales_order = %(so)s AND docstatus != 2 AND LOWER(IFNULL(status, '')) != 'cancelled' "
             "ORDER BY modified DESC LIMIT 500",
             {"so": so}
         )
@@ -232,6 +232,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             "FROM `tabWork Order` wo "
             "LEFT JOIN `tabWork Order Item` woi ON woi.parent = wo.name "
             "WHERE (wo.sales_order = %(so)s OR woi.sales_order = %(so)s) "
+            "AND wo.docstatus != 2 AND LOWER(IFNULL(wo.status, '')) != 'cancelled' "
             "ORDER BY wo.modified DESC LIMIT 500",
             {"so": so}
         )
@@ -243,7 +244,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
         return safe_sql(
             "SELECT name, status, work_order, operation, workstation, for_quantity, total_completed_qty, process_loss_qty "
             "FROM `tabJob Card` "
-            "WHERE work_order IN %(wo)s "
+            "WHERE work_order IN %(wo)s AND docstatus != 2 AND LOWER(IFNULL(status, '')) != 'cancelled' "
             "ORDER BY modified DESC LIMIT 4000",
             {"wo": tuple(wo_names)}
         )
@@ -269,6 +270,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             "JOIN `tabJob Card` jc ON jc.name = jctl.parent "
             "LEFT JOIN `tabWork Order` wo ON wo.name = jc.work_order "
             "WHERE jc.work_order IN %(wo)s AND IFNULL(jctl.completed_qty, 0) > 0 "
+            "AND jc.docstatus != 2 AND LOWER(IFNULL(jc.status, '')) != 'cancelled' "
             "ORDER BY jctl.from_time DESC, wo.production_item ASC, jc.operation ASC",
             {"wo": tuple(wo_names)},
         )
@@ -302,7 +304,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             "IFNULL(jc.process_loss_qty, 0) AS process_loss_qty "
             "FROM `tabJob Card` jc "
             "LEFT JOIN `tabWork Order` wo ON wo.name = jc.work_order "
-            "WHERE jc.work_order IN %(wo)s "
+            "WHERE jc.work_order IN %(wo)s AND jc.docstatus != 2 AND LOWER(IFNULL(jc.status, '')) != 'cancelled' "
             "ORDER BY wo.production_item, jc.name",
             {"wo": tuple(wo_names)},
         )
@@ -435,6 +437,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             "JOIN `tabJob Card Time Log` jctl ON jctl.parent = jc.name "
             "LEFT JOIN `tabWork Order` wo ON wo.name = jc.work_order "
             "WHERE jc.work_order IN %(wo)s "
+            "AND jc.docstatus != 2 AND LOWER(IFNULL(jc.status, '')) != 'cancelled' "
             "ORDER BY jc.work_order, jc.name, jctl.from_time",
             {"wo": tuple(wo_names)}
         )
@@ -456,6 +459,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "JOIN `tabJob Card Time Log` jctl ON jctl.parent = jc.name "
                 "LEFT JOIN `tabWork Order` wo ON wo.name = jc.work_order "
                 "WHERE jc.work_order IN %(wo)s "
+                "AND jc.docstatus != 2 AND LOWER(IFNULL(jc.status, '')) != 'cancelled' "
                 "ORDER BY jc.work_order, jc.name, jctl.from_time",
                 {"wo": tuple(wo_names)}
             )
@@ -2578,7 +2582,8 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             work_order_rows = safe_sql(
                 "SELECT DISTINCT wo.name, wo.status, wo.production_plan, wo.sales_order_item, wo.production_item AS item_code, wo.qty, wo.produced_qty "
                 "FROM `tabWork Order` wo "
-                "WHERE wo.sales_order = %(so)s OR wo.sales_order_item IN %(so_items)s "
+                "WHERE (wo.sales_order = %(so)s OR wo.sales_order_item IN %(so_items)s) "
+                "AND wo.docstatus != 2 AND LOWER(IFNULL(wo.status, '')) != 'cancelled' "
                 "ORDER BY wo.modified DESC LIMIT 2000",
                 {"so": so, "so_items": tuple(so_item_names)}
             )
@@ -2611,6 +2616,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "SELECT DISTINCT wo.name, wo.status, wo.production_plan, wo.sales_order_item, wo.production_item AS item_code, wo.qty, wo.produced_qty "
                 "FROM `tabWork Order` wo "
                 "WHERE wo.sales_order = %(so)s "
+                "AND wo.docstatus != 2 AND LOWER(IFNULL(wo.status, '')) != 'cancelled' "
                 "ORDER BY wo.modified DESC LIMIT 2000",
                 {"so": so}
             )
@@ -2671,7 +2677,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             job_card_rows = safe_sql(
                 "SELECT name, status, work_order, operation, workstation, for_quantity, total_completed_qty, process_loss_qty "
                 "FROM `tabJob Card` "
-                "WHERE work_order IN %(wo)s "
+                "WHERE work_order IN %(wo)s AND docstatus != 2 AND LOWER(IFNULL(status, '')) != 'cancelled' "
                 "ORDER BY modified DESC LIMIT 4000",
                 {"wo": tuple(work_order_names)}
             )
