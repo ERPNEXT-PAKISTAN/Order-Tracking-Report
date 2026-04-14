@@ -3480,7 +3480,7 @@ function materialShortageTable(rows){
           <th style="width:120px;text-align:right;">Qty/BOM</th>
           <th style="width:130px;text-align:right;">Required</th>
           <th style="width:130px;text-align:right;">Wastage on BOM</th>
-          <th style="width:220px;">Create PO<br><select class="form-control input-xs" data-ms-qty-mode style="margin-top:6px;"><option value="required_plus_wastage">Required + Wastage</option><option value="shortage_plus_wastage">Shortage + Wastage</option></select></th>
+          <th style="width:120px;">Create PO</th>
           <th style="width:100px;text-align:right;">Stock</th>
           <th style="width:120px;text-align:right;">Shortage</th>
           <th style="width:130px;text-align:right;">Suggested Qty</th>
@@ -3844,6 +3844,78 @@ function dailyProductionTable(rows, indicators){
       <thead><tr><th>From Time</th><th>To Time</th><th>Employee</th><th>Item</th><th>Operation Types</th><th style="text-align:right;">Completed Qty</th></tr></thead>
       <tbody>${body}</tbody></table></div>
   `;
+}
+
+function dailyJobCardReportTable(rows){
+  const list = (rows || []).filter((r) => Number(r.completed_qty || 0) > 0);
+  const preferredOps = ["Cutting", "Stitching", "Packing"];
+  const opSet = {};
+  const itemMap = {};
+
+  list.forEach((r) => {
+    const item = String(r.item_code || "-").trim() || "-";
+    const op = String(r.operation || "Operation").trim() || "Operation";
+    const fromTime = String(r.from_time || "").trim();
+    const jc = String(r.job_card || "").trim();
+    opSet[op] = 1;
+    if (!itemMap[item]) itemMap[item] = { rowsByTime: {}, processLossByOp: {}, finalByOp: {}, seenLoss: {}, seenFinal: {} };
+
+    if (!itemMap[item].rowsByTime[fromTime]) itemMap[item].rowsByTime[fromTime] = {};
+    itemMap[item].rowsByTime[fromTime][op] = Number(itemMap[item].rowsByTime[fromTime][op] || 0) + Number(r.completed_qty || 0);
+
+    const lossKey = `${jc}::${op}`;
+    if (jc && !itemMap[item].seenLoss[lossKey]) {
+      itemMap[item].seenLoss[lossKey] = 1;
+      itemMap[item].processLossByOp[op] = Number(itemMap[item].processLossByOp[op] || 0) + Number(r.process_loss_qty || 0);
+    }
+
+    const finalKey = `${jc}::${op}`;
+    if (jc && !itemMap[item].seenFinal[finalKey]) {
+      itemMap[item].seenFinal[finalKey] = 1;
+      itemMap[item].finalByOp[op] = Number(itemMap[item].finalByOp[op] || 0) + Number(r.total_completed_qty || 0);
+    }
+  });
+
+  const ops = Object.keys(opSet).sort((a, b) => {
+    const ia = preferredOps.indexOf(a);
+    const ib = preferredOps.indexOf(b);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.localeCompare(b);
+  });
+  const items = Object.keys(itemMap).sort((a, b) => a.localeCompare(b));
+
+  if (!items.length || !ops.length) {
+    return `<div class="text-muted">No daily job card data found.</div>`;
+  }
+
+  const body = items.map((item) => {
+    const block = itemMap[item] || {};
+    const lossCells = ops.map((op) => `<td style="text-align:center;color:#dc2626;font-weight:800;">${_n0((block.processLossByOp || {})[op] || 0)}</td>`).join("");
+    const finalCells = ops.map((op) => `<td style="text-align:center;color:#1d4ed8;font-weight:800;">${_n0((block.finalByOp || {})[op] || 0)}</td>`).join("");
+    const times = Object.keys(block.rowsByTime || {}).sort((a, b) => (a > b ? -1 : (a < b ? 1 : 0)));
+    const timeRows = times.map((t) => {
+      const opCells = ops.map((op) => `<td style="text-align:center;">${_n0(((block.rowsByTime || {})[t] || {})[op] || 0)}</td>`).join("");
+      return `<tr><td>${esc(fmtDT(t || "") || "-")}</td>${opCells}</tr>`;
+    }).join("");
+
+    return `
+      <tr><td colspan="${1 + ops.length}" style="background:#2f4f0d;color:#ffffff;font-weight:800;">${esc(item)}</td></tr>
+      <tr><td style="text-align:center;color:#dc2626;font-weight:800;">${__("Total Process Loss Qty")}</td>${lossCells}</tr>
+      ${timeRows}
+      <tr><td style="text-align:center;color:#1d4ed8;font-weight:800;">${__("Final Completed Qty")}</td>${finalCells}</tr>
+    `;
+  }).join("");
+
+  const opHead = ops.map((op) => `<th style="text-align:center;">${esc(op)}</th>`).join("");
+
+  return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;">
+    <thead>
+      <tr><th style="text-align:center;"></th><th colspan="${ops.length}" style="text-align:center;">${__("Operations")}</th></tr>
+      <tr><th style="text-align:center;">${__("From Time")}</th>${opHead}</tr>
+    </thead>
+    <tbody>${body}</tbody></table></div>`;
 }
 
 function bindDashboardActionButtons($wrap, frm, data){
@@ -5087,10 +5159,30 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
     };
   });
 
-  const getQtyMode = () => {
-    const mode = ($wrap.find("[data-ms-qty-mode]").val() || "required_plus_wastage").toString();
-    return mode === "shortage_plus_wastage" ? "shortage_plus_wastage" : "required_plus_wastage";
-  };
+  const askQtyMode = () => new Promise((resolve) => {
+    const d = new frappe.ui.Dialog({
+      title: __("Create PO Quantity Source"),
+      fields: [{ fieldtype: "HTML", fieldname: "body" }],
+      primary_action_label: __("Cancel"),
+      primary_action: () => {
+        d.hide();
+        resolve(null);
+      },
+    });
+    d.fields_dict.body.$wrapper.html(`
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn btn-primary" data-ms-choose-mode="required_plus_wastage">${__("Required + Wastage on BOM")}</button>
+        <button class="btn btn-warning" data-ms-choose-mode="shortage_plus_wastage">${__("Shortage + Wastage on BOM")}</button>
+      </div>
+    `);
+    d.fields_dict.body.$wrapper.find("[data-ms-choose-mode]").on("click", function(e){
+      e.preventDefault();
+      const mode = ($(this).attr("data-ms-choose-mode") || "").trim();
+      d.hide();
+      resolve(mode || null);
+    });
+    d.show();
+  });
 
   const pickBaseQty = (requiredQty, shortageQty, wastageQty, mode) => {
     const req = Math.max(Number(requiredQty || 0), 0);
@@ -5103,7 +5195,7 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
     return { base_qty: req, po_qty: req + wq };
   };
 
-  $wrap.find("[data-ms-create-po='1']").off("click").on("click", function(e){
+  $wrap.find("[data-ms-create-po='1']").off("click").on("click", async function(e){
     e.preventDefault();
     e.stopPropagation();
     const item = ($(this).attr("data-item") || "").trim();
@@ -5113,6 +5205,8 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
     const description = ($(this).attr("data-description") || "").trim();
     const wp = $(this).attr("data-wp");
     const wq = $(this).attr("data-wq");
+    const mode = await askQtyMode();
+    if (!mode) return;
     if (!item || soFlt(totalQtyFromShortage) <= 0) {
       frappe.msgprint(__("Invalid row for Create PO."));
       return;
@@ -5125,7 +5219,6 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
     const requiredQty = Number(requiredQtyAttr || ml.required_qty || 0);
     const shortageQty = Math.max(Number(shortageQtyAttr || ml.shortage_qty || 0), 0);
     const wpFinal = hasValue(wp) ? Number(wp) : (hasValue(d.custom_wastage_percentage) ? Number(d.custom_wastage_percentage) : Number(ml.wastage_pct || 0));
-    const mode = getQtyMode();
     const wqFinal = hasValue(wq) ? Number(wq) : (hasValue(d.custom_wastage_qty) ? Number(d.custom_wastage_qty) : Number(ml.wastage_qty || 0));
     const qtyChoice = pickBaseQty(requiredQty > 0 ? requiredQty : Math.max(Number(totalQtyFromShortage || 0) - Number(wqFinal || 0), 0), shortageQty, wqFinal, mode);
     const baseQty = Number(qtyChoice.base_qty || 0);
@@ -5159,11 +5252,12 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
     });
   });
 
-  $wrap.find("[data-ms-create-po-group='1']").off("click").on("click", function(e){
+  $wrap.find("[data-ms-create-po-group='1']").off("click").on("click", async function(e){
     e.preventDefault();
     e.stopPropagation();
     const group = ($(this).attr("data-group") || "").trim();
-    const mode = getQtyMode();
+    const mode = await askQtyMode();
+    if (!mode) return;
     const defaultWarehouse = DEFAULT_MATERIAL_SHORTAGE_GROUP_WAREHOUSE;
     if (!group) return;
     const rows = (data.material_shortage || []).filter((r) => (r.item_group || "") === group && (r.item_code || "").trim());
@@ -5293,7 +5387,7 @@ function buildDashboard(frm, data){
 
     ${sectionBlock('production', 'Production Section', 'linear-gradient(90deg,#7a3e00,#a16207)', `
       ${card("Finished Goods Production Summary", "SO/PP/WO/JO progress with completion and wastage", fgSummaryTable(data.production_fg_summary || []))}
-      ${card("Daily Job Card Report", "Job Card time_logs with item and operation grouping", dailyProductionTable(data.daily_production || [], data.daily_production_indicators || {}))}
+      ${card("Daily Job Card Report", "Operation-wise daily Job Card matrix", dailyJobCardReportTable(data.daily_production || []))}
       ${card("Daily Production Report", "From Job Card time_logs table (daily rows)", dailyProductionTable(data.daily_production || [], data.daily_production_indicators || {}))}
       ${card("Production Details", "Job Card / Operation / Material details", productionTree(data.production_tree||[]))}
       ${card("Production Timeline", "Work Orders, Delivery Notes and Invoices timeline", timelineView(data.gantt_timeline || []))}

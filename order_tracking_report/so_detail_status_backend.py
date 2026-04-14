@@ -257,6 +257,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             "SELECT "
             "jc.name AS job_card, "
             "jc.operation AS operation, "
+            "IFNULL(jc.total_completed_qty, 0) AS total_completed_qty, "
             "IFNULL(jc.process_loss_qty, 0) AS process_loss_qty, "
             "wo.production_item AS item_code, "
             "jctl.employee AS employee, "
@@ -279,6 +280,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                     "job_card": row.get("job_card") or "",
                     "item_code": row.get("item_code") or "",
                     "operation": row.get("operation") or "",
+                    "total_completed_qty": to_float(row.get("total_completed_qty")),
                     "employee": row.get("employee") or "",
                     "from_time": fmt_date(row.get("from_time")),
                     "to_time": fmt_date(row.get("to_time")),
