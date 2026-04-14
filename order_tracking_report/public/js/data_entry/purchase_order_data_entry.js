@@ -106,6 +106,18 @@
 
 	frappe.ui.form.on(DOCTYPE, {
 		refresh(frm) {
+			if (frm.fields_dict && frm.fields_dict.custom_so_number) {
+				frm.set_df_property('custom_so_number', 'read_only', 0);
+				frm.set_df_property('custom_so_number', 'reqd', 0);
+				frm.set_query('custom_so_number', function () {
+					return {
+						filters: {
+							docstatus: ['<', 2]
+						}
+					};
+				});
+			}
+
 			frm.add_custom_button(BUTTON_LABEL, function () {
 				let items_data = [];
 				let last_qty = null;

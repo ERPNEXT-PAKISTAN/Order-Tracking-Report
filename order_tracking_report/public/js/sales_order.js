@@ -3416,7 +3416,7 @@ function materialShortageTable(rows){
     const stk = list.reduce((a, r) => a + Number(r.stock_qty || 0), 0);
     const sht = list.reduce((a, r) => a + Number(r.shortage_qty || 0), 0);
     const wst = list.reduce((a, r) => a + Number(r.wastage_qty || 0), 0);
-    const suggested = sht + wst;
+    const suggested = sht > 0 ? (sht + wst) : 0;
     const poq = list.reduce((a, r) => a + Number(r.po_qty || 0), 0);
     const wpo = list.reduce((a, r) => a + ((Number(r.po_qty || 0) * Number(r.wastage_pct || 0)) / 100), 0);
     const prq = list.reduce((a, r) => a + Number(r.pr_qty || 0), 0);
@@ -3443,11 +3443,13 @@ function materialShortageTable(rows){
     `;
 
     list.forEach((r) => {
-      let shortageQty = Number(r.required_qty || 0) + Number(r.wastage_qty || 0);
-      if (shortageQty <= 0) shortageQty = Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0);
-      if (shortageQty <= 0) shortageQty = Number(r.pending_po_qty || 0);
-      if (shortageQty <= 0) shortageQty = Number(r.po_qty || 0);
-      if (shortageQty <= 0) shortageQty = 1;
+      const requiredQty = Number(r.required_qty || 0);
+      const shortageOnly = Math.max(Number(r.shortage_qty || 0), 0);
+      const wastageQty = Math.max(Number(r.wastage_qty || 0), 0);
+      const createQtyRequired = Math.max(requiredQty + wastageQty, 0);
+      const createQtyShortage = shortageOnly > 0 ? (shortageOnly + wastageQty) : 0;
+      const defaultCreateQty = createQtyRequired > 0 ? createQtyRequired : createQtyShortage;
+      const suggestedRow = shortageOnly > 0 ? (shortageOnly + wastageQty) : 0;
       body += `
         <tr data-panel="${esc(key)}" style="display:none;">
           <td style="padding-left:26px;width:13%;min-width:140px;"><a href="#" data-ms-item-detail="1" data-item="${esc(r.item_code || "")}" style="font-weight:700;">${esc(r.item_code || "")}</a></td>
@@ -3455,11 +3457,11 @@ function materialShortageTable(rows){
           <td style="text-align:right;">${_n0(r.required_qty)}</td>
           <td style="text-align:right;">${_n0(r.wastage_qty || 0)}</td>
           <td>
-            <button class="btn btn-xs btn-primary" data-ms-create-po="1" data-item="${esc(r.item_code || "")}" data-qty="${esc(shortageQty)}" data-required="${esc(r.required_qty || 0)}" data-description="${esc(r.item_code || "")}" data-wp="${esc(r.wastage_pct || 0)}" data-wq="${esc(r.wastage_qty || 0)}">${__("Create PO")}</button>
+            <button class="btn btn-xs btn-primary" data-ms-create-po="1" data-item="${esc(r.item_code || "")}" data-qty="${esc(defaultCreateQty)}" data-required="${esc(r.required_qty || 0)}" data-shortage="${esc(r.shortage_qty || 0)}" data-description="${esc(r.item_code || "")}" data-wp="${esc(r.wastage_pct || 0)}" data-wq="${esc(r.wastage_qty || 0)}">${__("Create PO")}</button>
           </td>
           <td style="text-align:right;background:#f1f5f9;">${_n0(r.stock_qty)}</td>
           <td style="text-align:right;" class="${Number(r.shortage_qty||0)>0?'so-danger':'so-success'}">${_n0(r.shortage_qty)}</td>
-          <td style="text-align:right;">${_n0((Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0)))}</td>
+          <td style="text-align:right;">${_n0(suggestedRow)}</td>
           <td style="text-align:right;">${_n0(r.po_qty)}</td>
           <td style="text-align:right;">${_n0((Number(r.po_qty || 0) * Number(r.wastage_pct || 0)) / 100)}</td>
           <td style="text-align:right;">${_n0(r.pr_qty)}</td>
@@ -3478,7 +3480,7 @@ function materialShortageTable(rows){
           <th style="width:120px;text-align:right;">Qty/BOM</th>
           <th style="width:130px;text-align:right;">Required</th>
           <th style="width:130px;text-align:right;">Wastage on BOM</th>
-          <th style="width:120px;">Create PO</th>
+          <th style="width:220px;">Create PO<br><select class="form-control input-xs" data-ms-qty-mode style="margin-top:6px;"><option value="required_plus_wastage">Required + Wastage</option><option value="shortage_plus_wastage">Shortage + Wastage</option></select></th>
           <th style="width:100px;text-align:right;">Stock</th>
           <th style="width:120px;text-align:right;">Shortage</th>
           <th style="width:130px;text-align:right;">Suggested Qty</th>
@@ -5085,12 +5087,29 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
     };
   });
 
+  const getQtyMode = () => {
+    const mode = ($wrap.find("[data-ms-qty-mode]").val() || "required_plus_wastage").toString();
+    return mode === "shortage_plus_wastage" ? "shortage_plus_wastage" : "required_plus_wastage";
+  };
+
+  const pickBaseQty = (requiredQty, shortageQty, wastageQty, mode) => {
+    const req = Math.max(Number(requiredQty || 0), 0);
+    const sht = Math.max(Number(shortageQty || 0), 0);
+    const wq = Math.max(Number(wastageQty || 0), 0);
+    if (mode === "shortage_plus_wastage") {
+      if (sht > 0) return { base_qty: sht, po_qty: sht + wq };
+      return { base_qty: 0, po_qty: 0 };
+    }
+    return { base_qty: req, po_qty: req + wq };
+  };
+
   $wrap.find("[data-ms-create-po='1']").off("click").on("click", function(e){
     e.preventDefault();
     e.stopPropagation();
     const item = ($(this).attr("data-item") || "").trim();
     const totalQtyFromShortage = soFlt($(this).attr("data-qty") || 0);
     const requiredQtyAttr = soFlt($(this).attr("data-required") || 0);
+    const shortageQtyAttr = soFlt($(this).attr("data-shortage") || 0);
     const description = ($(this).attr("data-description") || "").trim();
     const wp = $(this).attr("data-wp");
     const wq = $(this).attr("data-wq");
@@ -5104,11 +5123,14 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
     const warehouse = d.warehouse || frm.doc.set_warehouse || "";
     const rate = Number(d.rate || ml.last_purchase_rate || 0);
     const requiredQty = Number(requiredQtyAttr || ml.required_qty || 0);
-    const baseQty = requiredQty > 0 ? requiredQty : Math.max(Number(totalQtyFromShortage || 0) - Number(ml.wastage_qty || 0), 0);
+    const shortageQty = Math.max(Number(shortageQtyAttr || ml.shortage_qty || 0), 0);
     const wpFinal = hasValue(wp) ? Number(wp) : (hasValue(d.custom_wastage_percentage) ? Number(d.custom_wastage_percentage) : Number(ml.wastage_pct || 0));
-    const wqFinal = hasValue(wq) ? Number(wq) : (hasValue(d.custom_wastage_qty) ? Number(d.custom_wastage_qty) : Number(ml.wastage_qty || ((baseQty * wpFinal) / 100)));
+    const mode = getQtyMode();
+    const wqFinal = hasValue(wq) ? Number(wq) : (hasValue(d.custom_wastage_qty) ? Number(d.custom_wastage_qty) : Number(ml.wastage_qty || 0));
+    const qtyChoice = pickBaseQty(requiredQty > 0 ? requiredQty : Math.max(Number(totalQtyFromShortage || 0) - Number(wqFinal || 0), 0), shortageQty, wqFinal, mode);
+    const baseQty = Number(qtyChoice.base_qty || 0);
     const extraFinal = Number(d.extra_qty || 0);
-    const poQty = Number(baseQty + wqFinal + extraFinal);
+    const poQty = Number(qtyChoice.po_qty || 0) + extraFinal;
 
     open_po_item_data_entry(frm, {
       item_group: ml.item_group || "",
@@ -5141,6 +5163,7 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
     e.preventDefault();
     e.stopPropagation();
     const group = ($(this).attr("data-group") || "").trim();
+    const mode = getQtyMode();
     const defaultWarehouse = DEFAULT_MATERIAL_SHORTAGE_GROUP_WAREHOUSE;
     if (!group) return;
     const rows = (data.material_shortage || []).filter((r) => (r.item_group || "") === group && (r.item_code || "").trim());
@@ -5152,19 +5175,29 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
       ...(itemDefaults[r.item_code || ""] || {}),
       item_code: r.item_code || "",
       qty: (function(){
-        let q = Number(r.required_qty || 0);
-        if (q <= 0) q = Number(r.shortage_qty || 0);
+        const req = Number(r.required_qty || 0);
+        const sht = Math.max(Number(r.shortage_qty || 0), 0);
+        const wq = Math.max(Number(r.wastage_qty || 0), 0);
+        let q = mode === "shortage_plus_wastage" ? sht : req;
+        if (q <= 0 && mode !== "shortage_plus_wastage") q = sht;
         if (q <= 0) q = Number(r.pending_po_qty || 0);
         if (q <= 0) q = Number(r.po_qty || 0);
         if (q <= 0) q = 1;
         return q;
       })(),
-      base_qty: Number(r.required_qty || 0),
+      base_qty: (function(){
+        const req = Number(r.required_qty || 0);
+        const sht = Math.max(Number(r.shortage_qty || 0), 0);
+        if (mode === "shortage_plus_wastage") return sht;
+        return req;
+      })(),
       custom_wastage_percentage: Number(r.wastage_pct || 0),
       custom_wastage_qty: Number(r.wastage_qty || 0),
       po_qty: (function(){
-        let q = Number(r.required_qty || 0) + Number(r.wastage_qty || 0);
-        if (q <= 0) q = Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0);
+        let q = mode === "shortage_plus_wastage"
+          ? (Math.max(Number(r.shortage_qty || 0), 0) + Number(r.wastage_qty || 0))
+          : (Number(r.required_qty || 0) + Number(r.wastage_qty || 0));
+        if (q <= 0 && mode !== "shortage_plus_wastage") q = Number(r.shortage_qty || 0) + Number(r.wastage_qty || 0);
         if (q <= 0) q = Number(r.pending_po_qty || 0);
         if (q <= 0) q = Number(r.po_qty || 0);
         if (q <= 0) q = 1;
@@ -5260,6 +5293,7 @@ function buildDashboard(frm, data){
 
     ${sectionBlock('production', 'Production Section', 'linear-gradient(90deg,#7a3e00,#a16207)', `
       ${card("Finished Goods Production Summary", "SO/PP/WO/JO progress with completion and wastage", fgSummaryTable(data.production_fg_summary || []))}
+      ${card("Daily Job Card Report", "Job Card time_logs with item and operation grouping", dailyProductionTable(data.daily_production || [], data.daily_production_indicators || {}))}
       ${card("Daily Production Report", "From Job Card time_logs table (daily rows)", dailyProductionTable(data.daily_production || [], data.daily_production_indicators || {}))}
       ${card("Production Details", "Job Card / Operation / Material details", productionTree(data.production_tree||[]))}
       ${card("Production Timeline", "Work Orders, Delivery Notes and Invoices timeline", timelineView(data.gantt_timeline || []))}
