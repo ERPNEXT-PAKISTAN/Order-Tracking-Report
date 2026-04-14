@@ -259,48 +259,71 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             "jc.operation AS operation, "
             "IFNULL(jc.process_loss_qty, 0) AS process_loss_qty, "
             "wo.production_item AS item_code, "
+            "jctl.employee AS employee, "
+            "jctl.from_time AS from_time, "
+            "jctl.to_time AS to_time, "
+            "IFNULL(jctl.time_in_mins, 0) AS time_in_mins, "
             "IFNULL(jctl.completed_qty, 0) AS completed_qty "
             "FROM `tabJob Card Time Log` jctl "
             "JOIN `tabJob Card` jc ON jc.name = jctl.parent "
             "LEFT JOIN `tabWork Order` wo ON wo.name = jc.work_order "
             "WHERE jc.work_order IN %(wo)s AND IFNULL(jctl.completed_qty, 0) > 0 "
-            "ORDER BY wo.production_item ASC, jc.operation ASC, jctl.from_time ASC",
+            "ORDER BY jctl.from_time DESC, wo.production_item ASC, jc.operation ASC",
             {"wo": tuple(wo_names)},
         )
 
-        grouped = {}
-        for row in rows:
-            item_code = row.get("item_code") or ""
-            operation = row.get("operation") or ""
-            key = (item_code, operation)
-
-            if key not in grouped:
-                grouped[key] = {
-                    "item_code": item_code,
-                    "operation": operation,
-                    "completed_qty": 0,
-                    "process_loss_qty": 0,
-                    "_job_cards": {},
-                }
-
-            grouped[key]["completed_qty"] = to_float(grouped[key].get("completed_qty")) + to_float(row.get("completed_qty"))
-
-            jc_name = row.get("job_card") or ""
-            if jc_name and jc_name not in grouped[key]["_job_cards"]:
-                grouped[key]["_job_cards"][jc_name] = 1
-                grouped[key]["process_loss_qty"] = to_float(grouped[key].get("process_loss_qty")) + to_float(row.get("process_loss_qty"))
-
         out = []
-        for key in sorted(grouped.keys(), key=lambda k: (k[0], k[1])):
-            row = grouped[key]
+        for row in rows:
             out.append(
                 {
+                    "job_card": row.get("job_card") or "",
                     "item_code": row.get("item_code") or "",
                     "operation": row.get("operation") or "",
+                    "employee": row.get("employee") or "",
+                    "from_time": fmt_date(row.get("from_time")),
+                    "to_time": fmt_date(row.get("to_time")),
+                    "time_in_mins": to_float(row.get("time_in_mins")),
                     "completed_qty": to_float(row.get("completed_qty")),
                     "process_loss_qty": to_float(row.get("process_loss_qty")),
                 }
             )
+        return out
+
+
+    def get_job_card_indicators_by_item(wo_names):
+        if not wo_names:
+            return {}
+
+        rows = safe_sql(
+            "SELECT jc.name AS job_card, wo.production_item AS item_code, "
+            "IFNULL(jc.total_completed_qty, 0) AS total_completed_qty, "
+            "IFNULL(jc.process_loss_qty, 0) AS process_loss_qty "
+            "FROM `tabJob Card` jc "
+            "LEFT JOIN `tabWork Order` wo ON wo.name = jc.work_order "
+            "WHERE jc.work_order IN %(wo)s "
+            "ORDER BY wo.production_item, jc.name",
+            {"wo": tuple(wo_names)},
+        )
+
+        out = {}
+        seen = {}
+        for row in rows:
+            item_code = row.get("item_code") or ""
+            jc_name = row.get("job_card") or ""
+            if not item_code or not jc_name:
+                continue
+            if jc_name in seen:
+                continue
+            seen[jc_name] = 1
+            if item_code not in out:
+                out[item_code] = {
+                    "item_code": item_code,
+                    "total_completed_qty": 0,
+                    "total_process_loss_qty": 0,
+                }
+            out[item_code]["total_completed_qty"] = to_float(out[item_code].get("total_completed_qty")) + to_float(row.get("total_completed_qty"))
+            out[item_code]["total_process_loss_qty"] = to_float(out[item_code].get("total_process_loss_qty")) + to_float(row.get("process_loss_qty"))
+
         return out
 
 
@@ -584,6 +607,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
     
         emp_logs = get_employee_logs_for_wos(wo_names)
         daily_production = get_daily_production_from_job_cards(wo_names)
+        daily_production_indicators = get_job_card_indicators_by_item(wo_names)
         emp_summary_map = employee_summary_by_wo(emp_logs)
     
         emp_logs_by_wo = {}
@@ -645,6 +669,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
         return {
             "tree": tree,
             "daily_production": daily_production,
+            "daily_production_indicators": daily_production_indicators,
             "totals": {
                 "total_qty": total_qty,
                 "produced_qty": total_produced,

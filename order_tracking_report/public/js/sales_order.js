@@ -3760,62 +3760,88 @@ function fgSummaryTable(rows){
     <tbody>${body}</tbody></table></div>`;
 }
 
-function dailyProductionTable(rows){
-  const list = (rows || []).filter((r) => Number(r.completed_qty || 0) > 0 || Number(r.process_loss_qty || 0) > 0);
-  const preferredOps = ["Cutting", "Stitching", "Packing"];
-  const opSet = {};
-  const itemMap = {};
+function dailyProductionTable(rows, indicators){
+  const list = (rows || []).filter((r) => Number(r.completed_qty || 0) > 0);
+  const indicatorMap = indicators || {};
+  const totals = Object.keys(indicatorMap).reduce((acc, itemCode) => {
+    const row = indicatorMap[itemCode] || {};
+    acc.completed += Number(row.total_completed_qty || 0);
+    acc.loss += Number(row.total_process_loss_qty || 0);
+    return acc;
+  }, { completed: 0, loss: 0 });
 
+  const grouped = {};
   list.forEach((r) => {
-    const item = String(r.item_code || "").trim();
-    const op = String(r.operation || "").trim() || "Operation";
-    if (!item) return;
-    opSet[op] = 1;
-    if (!itemMap[item]) itemMap[item] = { item_code: item, qty_by_op: {}, loss_by_op: {} };
-    itemMap[item].qty_by_op[op] = Number(itemMap[item].qty_by_op[op] || 0) + Number(r.completed_qty || 0);
-    // process_loss_qty is one value by operation; backend already deduplicates by Job Card
-    itemMap[item].loss_by_op[op] = Number(itemMap[item].loss_by_op[op] || 0) + Number(r.process_loss_qty || 0);
+    const item = String(r.item_code || "-").trim() || "-";
+    if (!grouped[item]) grouped[item] = [];
+    grouped[item].push(r);
   });
 
-  const ops = Object.keys(opSet).sort((a, b) => {
-    const ia = preferredOps.indexOf(a);
-    const ib = preferredOps.indexOf(b);
-    if (ia !== -1 && ib !== -1) return ia - ib;
-    if (ia !== -1) return -1;
-    if (ib !== -1) return 1;
-    return a.localeCompare(b);
+  const groupKeys = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+  groupKeys.forEach((item) => {
+    grouped[item].sort((a, b) => {
+      const ta = String(a.from_time || "");
+      const tb = String(b.from_time || "");
+      if (ta === tb) return String(a.operation || "").localeCompare(String(b.operation || ""));
+      return ta > tb ? -1 : 1;
+    });
   });
 
-  const items = Object.keys(itemMap).sort();
-  const body = items.length ? items.map((itemCode) => {
-    const row = itemMap[itemCode];
-    const opCells = ops.map((op) => `
-      <td style="text-align:right;">${_n0((row.qty_by_op || {})[op] || 0)}</td>
-      <td style="text-align:right;">${_n0((row.loss_by_op || {})[op] || 0)}</td>
-    `).join("");
-    const totalQty = ops.reduce((sum, op) => sum + Number((row.qty_by_op || {})[op] || 0), 0);
-    const totalLoss = ops.reduce((sum, op) => sum + Number((row.loss_by_op || {})[op] || 0), 0);
-    return `
+  const body = groupKeys.length ? groupKeys.map((item) => {
+    const rowsForItem = grouped[item] || [];
+    const byOperation = {};
+    rowsForItem.forEach((r) => {
+      const op = String(r.operation || "Operation").trim() || "Operation";
+      if (!byOperation[op]) byOperation[op] = [];
+      byOperation[op].push(r);
+    });
+
+    const opKeys = Object.keys(byOperation).sort((a, b) => a.localeCompare(b));
+    opKeys.forEach((op) => {
+      byOperation[op].sort((a, b) => {
+        const ta = String(a.from_time || "");
+        const tb = String(b.from_time || "");
+        return ta > tb ? -1 : (ta < tb ? 1 : 0);
+      });
+    });
+
+    const itemHeader = `
       <tr>
-        <td>${esc(row.item_code || "-")}</td>
-        ${opCells}
-        <td style="text-align:right;font-weight:800;">${_n0(totalQty)}</td>
-        <td style="text-align:right;font-weight:800;">${_n0(totalLoss)}</td>
+        <td colspan="6" style="background:linear-gradient(90deg,#dbeafe,#eff6ff);color:#1e3a8a;font-weight:800;"><strong>${esc(item)}</strong></td>
       </tr>
     `;
-  }).join("") : `<tr><td colspan="3" class="text-muted">No production rows found.</td></tr>`;
 
-  const opHead = ops.map((op) => `
-    <th class="text-right">${esc(op)} Qty</th>
-    <th class="text-right">${esc(op)} Loss</th>
-  `).join("");
+    const opBlocks = opKeys.map((op) => {
+      const opHeader = `
+        <tr>
+          <td colspan="6" style="background:linear-gradient(90deg,#ecfeff,#f0fdfa);color:#0f766e;font-weight:700;padding-left:20px;"><strong>Operation: ${esc(op)}</strong></td>
+        </tr>
+      `;
+      const opRows = (byOperation[op] || []).map((r) => `
+        <tr>
+          <td>${esc(fmtDT(r.from_time || "") || "-")}</td>
+          <td>${esc(fmtDT(r.to_time || "") || "-")}</td>
+          <td>${esc(r.employee || "-")}</td>
+          <td>${esc(r.item_code || "-")}</td>
+          <td>${esc(r.operation || "-")}</td>
+          <td style="text-align:right;">${_n0(r.completed_qty || 0)}</td>
+        </tr>
+      `).join("");
+      return `${opHeader}${opRows}`;
+    }).join("");
 
-  const colspan = 1 + (ops.length * 2) + 2;
-  const finalBody = items.length ? body : `<tr><td colspan="${colspan}" class="text-muted">No production rows found.</td></tr>`;
+    return `${itemHeader}${opBlocks}`;
+  }).join("") : `<tr><td colspan="6" class="text-muted">No production rows found.</td></tr>`;
 
-  return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;">
-    <thead><tr><th>Item</th>${opHead}<th class="text-right">Total Completed Qty</th><th class="text-right">Total Process Loss Qty</th></tr></thead>
-    <tbody>${finalBody}</tbody></table></div>`;
+  return `
+    <div style="margin-bottom:10px;padding:10px;border:1px solid #bfdbfe;border-radius:10px;background:#eff6ff;color:#1e3a8a;font-weight:700;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <span class="so-summary-chip">Total Final Completed Qty (Job Card.total_completed_qty): <b>${_n0(totals.completed)}</b></span>
+      <span class="so-summary-chip">Total Process Loss Qty (Job Card.process_loss_qty): <b>${_n0(totals.loss)}</b></span>
+    </div>
+    <div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;">
+      <thead><tr><th>From Time</th><th>To Time</th><th>Employee</th><th>Item</th><th>Operation Types</th><th style="text-align:right;">Completed Qty</th></tr></thead>
+      <tbody>${body}</tbody></table></div>
+  `;
 }
 
 function bindDashboardActionButtons($wrap, frm, data){
@@ -5234,7 +5260,7 @@ function buildDashboard(frm, data){
 
     ${sectionBlock('production', 'Production Section', 'linear-gradient(90deg,#7a3e00,#a16207)', `
       ${card("Finished Goods Production Summary", "SO/PP/WO/JO progress with completion and wastage", fgSummaryTable(data.production_fg_summary || []))}
-      ${card("Daily Production Report", "From Job Card time logs grouped by item and operation", dailyProductionTable(data.daily_production || []))}
+      ${card("Daily Production Report", "From Job Card time_logs table (daily rows)", dailyProductionTable(data.daily_production || [], data.daily_production_indicators || {}))}
       ${card("Production Details", "Job Card / Operation / Material details", productionTree(data.production_tree||[]))}
       ${card("Production Timeline", "Work Orders, Delivery Notes and Invoices timeline", timelineView(data.gantt_timeline || []))}
       ${card("Machine Utilization", "Workstation time from Job Card Time Logs", machineUtilization(data.machine_utilization || []))}
