@@ -3761,20 +3761,61 @@ function fgSummaryTable(rows){
 }
 
 function dailyProductionTable(rows){
-  const list = (rows || []).filter((r) => Number(r.completed_qty || 0) > 0);
-  const body = list.length ? list.map((r) => `
-    <tr>
-      <td>${esc(fmtDT(r.from_time || "") || "-")}</td>
-      <td>${esc(r.item_code || "-")}</td>
-      <td>${esc(r.operation || "-")}</td>
-      <td style="text-align:right;">${_n0(r.completed_qty || 0)}</td>
-      <td style="text-align:right;">${_n0(r.process_loss_qty || 0)}</td>
-    </tr>
-  `).join("") : `<tr><td colspan="5" class="text-muted">No daily production rows with completed quantity greater than zero.</td></tr>`;
+  const list = (rows || []).filter((r) => Number(r.completed_qty || 0) > 0 || Number(r.process_loss_qty || 0) > 0);
+  const preferredOps = ["Cutting", "Stitching", "Packing"];
+  const opSet = {};
+  const itemMap = {};
+
+  list.forEach((r) => {
+    const item = String(r.item_code || "").trim();
+    const op = String(r.operation || "").trim() || "Operation";
+    if (!item) return;
+    opSet[op] = 1;
+    if (!itemMap[item]) itemMap[item] = { item_code: item, qty_by_op: {}, loss_by_op: {} };
+    itemMap[item].qty_by_op[op] = Number(itemMap[item].qty_by_op[op] || 0) + Number(r.completed_qty || 0);
+    // process_loss_qty is one value by operation; backend already deduplicates by Job Card
+    itemMap[item].loss_by_op[op] = Number(itemMap[item].loss_by_op[op] || 0) + Number(r.process_loss_qty || 0);
+  });
+
+  const ops = Object.keys(opSet).sort((a, b) => {
+    const ia = preferredOps.indexOf(a);
+    const ib = preferredOps.indexOf(b);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.localeCompare(b);
+  });
+
+  const items = Object.keys(itemMap).sort();
+  const body = items.length ? items.map((itemCode) => {
+    const row = itemMap[itemCode];
+    const opCells = ops.map((op) => `
+      <td style="text-align:right;">${_n0((row.qty_by_op || {})[op] || 0)}</td>
+      <td style="text-align:right;">${_n0((row.loss_by_op || {})[op] || 0)}</td>
+    `).join("");
+    const totalQty = ops.reduce((sum, op) => sum + Number((row.qty_by_op || {})[op] || 0), 0);
+    const totalLoss = ops.reduce((sum, op) => sum + Number((row.loss_by_op || {})[op] || 0), 0);
+    return `
+      <tr>
+        <td>${esc(row.item_code || "-")}</td>
+        ${opCells}
+        <td style="text-align:right;font-weight:800;">${_n0(totalQty)}</td>
+        <td style="text-align:right;font-weight:800;">${_n0(totalLoss)}</td>
+      </tr>
+    `;
+  }).join("") : `<tr><td colspan="3" class="text-muted">No production rows found.</td></tr>`;
+
+  const opHead = ops.map((op) => `
+    <th class="text-right">${esc(op)} Qty</th>
+    <th class="text-right">${esc(op)} Loss</th>
+  `).join("");
+
+  const colspan = 1 + (ops.length * 2) + 2;
+  const finalBody = items.length ? body : `<tr><td colspan="${colspan}" class="text-muted">No production rows found.</td></tr>`;
 
   return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;">
-    <thead><tr><th>From Time</th><th>Item</th><th>Operations</th><th style="text-align:right;">Completed Qty</th><th style="text-align:right;">Process Loss Qty</th></tr></thead>
-    <tbody>${body}</tbody></table></div>`;
+    <thead><tr><th>Item</th>${opHead}<th class="text-right">Total Completed Qty</th><th class="text-right">Total Process Loss Qty</th></tr></thead>
+    <tbody>${finalBody}</tbody></table></div>`;
 }
 
 function bindDashboardActionButtons($wrap, frm, data){
@@ -5193,7 +5234,7 @@ function buildDashboard(frm, data){
 
     ${sectionBlock('production', 'Production Section', 'linear-gradient(90deg,#7a3e00,#a16207)', `
       ${card("Finished Goods Production Summary", "SO/PP/WO/JO progress with completion and wastage", fgSummaryTable(data.production_fg_summary || []))}
-      ${card("Daily Production Report", "From Job Card time logs by date and employee", dailyProductionTable(data.daily_production || []))}
+      ${card("Daily Production Report", "From Job Card time logs grouped by item and operation", dailyProductionTable(data.daily_production || []))}
       ${card("Production Details", "Job Card / Operation / Material details", productionTree(data.production_tree||[]))}
       ${card("Production Timeline", "Work Orders, Delivery Notes and Invoices timeline", timelineView(data.gantt_timeline || []))}
       ${card("Machine Utilization", "Workstation time from Job Card Time Logs", machineUtilization(data.machine_utilization || []))}
