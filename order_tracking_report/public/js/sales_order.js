@@ -3765,16 +3765,15 @@ function dailyProductionTable(rows){
   const body = list.length ? list.map((r) => `
     <tr>
       <td>${esc(fmtDT(r.from_time || "") || "-")}</td>
-      <td>${esc(fmtDT(r.to_time || "") || "-")}</td>
-      <td>${esc(r.employee || "-")}</td>
       <td>${esc(r.item_code || "-")}</td>
+      <td>${esc(r.operation || "-")}</td>
       <td style="text-align:right;">${_n0(r.completed_qty || 0)}</td>
-      <td style="text-align:right;">${_n2(Number(r.time_in_mins || 0) / 60)}</td>
+      <td style="text-align:right;">${_n0(r.process_loss_qty || 0)}</td>
     </tr>
-  `).join("") : `<tr><td colspan="6" class="text-muted">No daily production rows with completed quantity greater than zero.</td></tr>`;
+  `).join("") : `<tr><td colspan="5" class="text-muted">No daily production rows with completed quantity greater than zero.</td></tr>`;
 
   return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;">
-    <thead><tr><th>From Time</th><th>To Time</th><th>Employee</th><th>Item</th><th style="text-align:right;">Completed Qty</th><th style="text-align:right;">Hours</th></tr></thead>
+    <thead><tr><th>From Time</th><th>Item</th><th>Operations</th><th style="text-align:right;">Completed Qty</th><th style="text-align:right;">Process Loss Qty</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 

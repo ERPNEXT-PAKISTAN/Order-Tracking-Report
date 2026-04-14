@@ -255,31 +255,62 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
 
         rows = safe_sql(
             "SELECT "
-            "jctl.employee AS employee, "
+            "DATE(jctl.from_time) AS production_date, "
+            "jc.name AS job_card, "
+            "jc.operation AS operation, "
+            "IFNULL(jc.process_loss_qty, 0) AS process_loss_qty, "
             "wo.production_item AS item_code, "
-            "SUM(IFNULL(jctl.completed_qty, 0)) AS completed_qty, "
-            "SUM(IFNULL(jctl.time_in_mins, 0)) AS time_in_mins, "
-            "MIN(jctl.from_time) AS from_time, "
-            "MAX(jctl.to_time) AS to_time "
+            "IFNULL(jctl.completed_qty, 0) AS completed_qty, "
+            "jctl.from_time AS from_time "
             "FROM `tabJob Card Time Log` jctl "
             "JOIN `tabJob Card` jc ON jc.name = jctl.parent "
             "LEFT JOIN `tabWork Order` wo ON wo.name = jc.work_order "
             "WHERE jc.work_order IN %(wo)s AND IFNULL(jctl.completed_qty, 0) > 0 "
-            "GROUP BY DATE(jctl.from_time), jctl.employee, wo.production_item "
-            "ORDER BY DATE(jctl.from_time) DESC, wo.production_item ASC, jctl.employee ASC",
+            "ORDER BY DATE(jctl.from_time) DESC, wo.production_item ASC, jc.operation ASC, jctl.from_time ASC",
             {"wo": tuple(wo_names)},
         )
 
-        out = []
+        grouped = {}
         for row in rows:
+            production_date = fmt_date(row.get("production_date"))
+            item_code = row.get("item_code") or ""
+            operation = row.get("operation") or ""
+            key = (production_date, item_code, operation)
+
+            if key not in grouped:
+                grouped[key] = {
+                    "production_date": production_date,
+                    "item_code": item_code,
+                    "operation": operation,
+                    "completed_qty": 0,
+                    "process_loss_qty": 0,
+                    "from_time": fmt_date(row.get("from_time")),
+                    "_job_cards": {},
+                }
+
+            grouped[key]["completed_qty"] = to_float(grouped[key].get("completed_qty")) + to_float(row.get("completed_qty"))
+
+            jc_name = row.get("job_card") or ""
+            if jc_name and jc_name not in grouped[key]["_job_cards"]:
+                grouped[key]["_job_cards"][jc_name] = 1
+                grouped[key]["process_loss_qty"] = to_float(grouped[key].get("process_loss_qty")) + to_float(row.get("process_loss_qty"))
+
+            current_from = grouped[key].get("from_time") or ""
+            row_from = fmt_date(row.get("from_time"))
+            if row_from and (not current_from or row_from < current_from):
+                grouped[key]["from_time"] = row_from
+
+        out = []
+        for key in sorted(grouped.keys(), reverse=True):
+            row = grouped[key]
             out.append(
                 {
-                    "employee": row.get("employee") or "",
+                    "production_date": row.get("production_date") or "",
                     "item_code": row.get("item_code") or "",
+                    "operation": row.get("operation") or "",
                     "completed_qty": to_float(row.get("completed_qty")),
-                    "time_in_mins": to_float(row.get("time_in_mins")),
-                    "from_time": fmt_date(row.get("from_time")),
-                    "to_time": fmt_date(row.get("to_time")),
+                    "process_loss_qty": to_float(row.get("process_loss_qty")),
+                    "from_time": row.get("from_time") or "",
                 }
             )
         return out
