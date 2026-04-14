@@ -747,7 +747,6 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                     if "complete" in jc_status or "close" in jc_status:
                         row["jc_done"] = row["jc_done"] + 1
                     row["jc_qty"] = to_float(row.get("jc_qty")) + to_float((jc or {}).get("for_quantity"))
-                    row["wastage_qty"] = to_float(row.get("wastage_qty")) + to_float((jc or {}).get("process_loss_qty"))
 
         out = list(summary.values())
         out.sort(key=lambda x: (x.get("item_code") or ""))

@@ -3791,7 +3791,7 @@ function fgSummaryTable(rows){
   `).join("") : `<tr><td colspan="7" class="text-muted">No FG production summary available.</td></tr>`;
 
   return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;">
-    <thead><tr><th>FG Item</th><th style="text-align:right;">SO Qty</th><th style="text-align:right;">PP Qty</th><th style="text-align:right;">WO Qty</th><th style="text-align:right;">JO Qty</th><th style="text-align:right;">Completed Qty</th><th style="text-align:right;">Wastage Qty</th></tr></thead>
+    <thead><tr><th>FG Item</th><th style="text-align:right;">SO Qty</th><th style="text-align:right;">PP Qty</th><th style="text-align:right;">WO Qty</th><th style="text-align:right;">JO Qty</th><th style="text-align:right;">Completed Qty</th><th style="text-align:right;">Wastage Qty (WO)</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 
