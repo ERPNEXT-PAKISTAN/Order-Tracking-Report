@@ -26,6 +26,8 @@ frappe.ui.form.on("Sales Order", {
   },
 
   refresh(frm) {
+    arrangeWastageControls(frm);
+
     if (!frm.doc.custom_wastage_mode) {
       frm.set_value("custom_wastage_mode", "Wastage");
     }
@@ -151,8 +153,8 @@ frappe.ui.form.on("Sales Order", {
 
     const currentLocation = (frm.__connection_stock_location || "Stores - AH").trim();
     f.$wrapper.html(`
-      <div class="so-connection-filter" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:10px;">
-        <div data-field="stock_location" style="min-width:260px;"></div>
+      <div class="so-connection-filter" style="display:flex;gap:8px;align-items:end;flex-wrap:nowrap;margin-bottom:10px;">
+        <div data-field="stock_location" style="min-width:260px;flex:1 1 260px;"></div>
         <button class="btn btn-sm btn-primary" data-action="apply-stock-location">${__("Apply Location")}</button>
         <button class="btn btn-sm btn-default" data-action="clear-stock-location">${__("Clear")}</button>
       </div>
@@ -375,6 +377,36 @@ function syncCustomWastagesFromMaterialShortage(frm) {
   if (mutated) {
     frm.refresh_field("custom_wastages");
   }
+
+  arrangeWastageControls(frm);
+}
+
+function arrangeWastageControls(frm) {
+  const wastagesField = frm.get_field("custom_wastages");
+  const modeField = frm.get_field("custom_wastage_mode");
+  const manualField = frm.get_field("custom_manual_wastage_percent");
+  if (!wastagesField || !modeField || !manualField) {
+    return;
+  }
+
+  const $wastages = wastagesField.$wrapper;
+  const $mode = modeField.$wrapper;
+  const $manual = manualField.$wrapper;
+  if (!$wastages || !$wastages.length || !$mode || !$mode.length || !$manual || !$manual.length) {
+    return;
+  }
+
+  const $container = $wastages.parent();
+  if ($container && $container.length) {
+    // Keep controls on one row and keep custom_wastages as the last block.
+    $container.append($mode);
+    $container.append($manual);
+    $container.append($wastages);
+  }
+
+  $mode.css({ display: "inline-block", width: "49%", verticalAlign: "top", paddingRight: "8px" });
+  $manual.css({ display: "inline-block", width: "49%", verticalAlign: "top" });
+  $wastages.css({ display: "block", width: "100%", marginTop: "8px" });
 }
 
 function esc(s){ return frappe.utils.escape_html(s == null ? "" : String(s)); }
@@ -630,9 +662,10 @@ function openDocItems(doctype, docname){
   });
 }
 
-function toggleHeader(title,right,key){
+function toggleHeader(title,right,key,isExpanded=true){
+  const icon = isExpanded ? "▾" : "▸";
   return `<div class="so-toggle" data-toggle="so" data-target="${esc(key)}">
-    <div class="l"><span data-icon>▾</span> ${title}</div>
+    <div class="l"><span data-icon>${icon}</span> ${title}</div>
     <div class="r">${right||""}</div>
   </div>`;
 }
@@ -873,7 +906,7 @@ function productionTree(tree){
     const wos = ppNode.work_orders || [];
     const keyPP = `pp_${i}_${pp.name}`;
 
-    html += toggleHeader(`<span class="so-prod-pp-head">Production Plan: ${esc(pp.name)}</span>`, `${badge(pp.status)} • ${wos.length} WO`, keyPP);
+    html += toggleHeader(`<span class="so-prod-pp-head">Production Plan: ${esc(pp.name)}</span>`, `${badge(pp.status)} • ${wos.length} WO`, keyPP, false);
 
     let woh = "";
     wos.forEach((wo,j)=>{
@@ -909,7 +942,7 @@ function productionTree(tree){
 
       const jcDone = (wo.job_cards || []).reduce((a, j) => a + Number(j.total_completed_qty || 0), 0);
       const jcLoss = (wo.job_cards || []).reduce((a, j) => a + Number(j.process_loss_qty || 0), 0);
-      woh += toggleHeader(`<span class="so-prod-wo-head">Work Order: ${esc(wo.name)}</span>`, `Qty ${soFlt(wo.qty)} • Done ${soFlt(wo.produced_qty)} • Loss ${soFlt((wo.process_loss_qty || 0) + jcLoss)} • ${esc(wo.completion_pct||0)}%`, keyWO);
+      woh += toggleHeader(`<span class="so-prod-wo-head">Work Order: ${esc(wo.name)}</span>`, `Qty ${soFlt(wo.qty)} • Done ${soFlt(wo.produced_qty)} • Loss ${soFlt((wo.process_loss_qty || 0) + jcLoss)} • ${esc(wo.completion_pct||0)}%`, keyWO, false);
       woh += panel(`
         ${top}
         <div style="margin-top:12px;font-weight:900;">Job Cards</div>
@@ -925,10 +958,10 @@ function productionTree(tree){
         ${empSummaryTable(wo.employee_summary||[])}
         <div style="margin-top:12px;font-weight:900;">Employees (Detailed Logs) — ${esc(wo.name)}</div>
         ${empLogsTable(wo.employee_logs||[])}
-      `, keyWO, true);
+      `, keyWO, false);
     });
 
-    html += panel(woh || `<div class="text-muted">No Work Orders.</div>`, keyPP, true);
+    html += panel(woh || `<div class="text-muted">No Work Orders.</div>`, keyPP, false);
   });
 
   return html;
@@ -2168,7 +2201,7 @@ function bomTree(tree){
       const rms = b.raw_materials || [];
       const rmBody = rms.length ? rms.map(x=>`
         <tr>
-          <td>${esc(x.item_code||"")}</td>
+          <td>${docLink("Item", x.item_code || "")}</td>
           <td style="text-align:right;">${soFlt(x.bom_qty)}</td>
           <td style="text-align:right;">${soFlt(x.required_qty)}</td>
           <td style="text-align:right;">${soFlt(x.stock_qty)}</td>
@@ -2176,7 +2209,7 @@ function bomTree(tree){
         </tr>
       `).join("") : `<tr><td colspan="5" class="text-muted">No BOM Items.</td></tr>`;
 
-      const ttl = `<span style="color:#111827;font-weight:900;">Item: ${esc(itemNode.item_code)}</span> <span style="color:#6b7280;">|</span> <span style="color:#b45309;font-weight:900;">BOM: ${esc(b.bom)}</span>`;
+      const ttl = `<span style="color:#111827;font-weight:900;">Item: ${docLink("Item", itemNode.item_code || "")}</span> <span style="color:#6b7280;">|</span> <span style="color:#b45309;font-weight:900;">BOM: ${docLink("BOM", b.bom || "")}</span>`;
       html += toggleHeader(ttl, `${soFlt(itemNode.order_qty || 0)} SO Qty • ${rms.length} RM`, key);
       html += panel(`
         <div class="table-responsive">

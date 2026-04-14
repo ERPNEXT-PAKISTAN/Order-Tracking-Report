@@ -1954,9 +1954,12 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
     
             grouped[key]["qty_per_bom"] = to_float(grouped[key].get("qty_per_bom")) + to_float(r.get("qty_per_bom"))
             grouped[key]["required_qty"] = to_float(grouped[key].get("required_qty")) + to_float(r.get("required_qty"))
-            grouped[key]["stock_qty"] = to_float(grouped[key].get("stock_qty")) + to_float(r.get("stock_qty"))
-            grouped[key]["shortage_qty"] = to_float(grouped[key].get("shortage_qty")) + to_float(r.get("shortage_qty"))
-            grouped[key]["purchase_suggestion_qty"] = to_float(grouped[key].get("purchase_suggestion_qty")) + to_float(r.get("purchase_suggestion_qty"))
+            # Same raw material can appear across multiple BOM lines. Stock must
+            # be treated as one pool for the selected location, not summed per row.
+            grouped[key]["stock_qty"] = max(
+                to_float(grouped[key].get("stock_qty")),
+                to_float(r.get("stock_qty")),
+            )
     
             linked = linked_item_map.get(item_code) or {}
             fallback = fallback_item_map.get(item_code) or {}
@@ -1978,8 +1981,15 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                     grouped[key]["wastage_pct"] = to_float(pct_from_item)
                 else:
                     grouped[key]["wastage_pct"] = to_float(pct_from_group)
-            grouped[key]["wastage_qty"] = round(
-                to_float(grouped[key].get("required_qty")) * to_float(grouped[key]["wastage_pct"]) / 100.0, 4
+        for rec in grouped.values():
+            required_qty = to_float(rec.get("required_qty"))
+            stock_qty = to_float(rec.get("stock_qty"))
+            shortage_qty = max(required_qty - stock_qty, 0)
+            rec["shortage_qty"] = shortage_qty
+            rec["purchase_suggestion_qty"] = shortage_qty
+            rec["wastage_qty"] = round(
+                required_qty * to_float(rec.get("wastage_pct")) / 100.0,
+                4,
             )
     
         out = list(grouped.values())
