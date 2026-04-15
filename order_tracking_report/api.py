@@ -1488,6 +1488,91 @@ def _get_fallback_supplier(item_code, company):
     return None
 
 
+def _coerce_po_item_rows(rows):
+    if not rows:
+        return []
+
+    if isinstance(rows, str):
+        rows = json.loads(rows)
+
+    if not isinstance(rows, list):
+        frappe.throw("PO item rows must be a list")
+
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        item_code = (row.get("item_code") or row.get("item") or "").strip()
+        if not item_code:
+            continue
+        out.append(
+            {
+                "item_code": item_code,
+                "supplier": (row.get("supplier") or "").strip(),
+                "warehouse": (row.get("warehouse") or "").strip(),
+                "rate": frappe.utils.flt(row.get("rate") or 0),
+                "base_qty": frappe.utils.flt(row.get("base_qty") or row.get("qty") or 0),
+                "qty": frappe.utils.flt(row.get("po_qty") or row.get("qty") or 0),
+                "descriptions": row.get("descriptions") or "",
+                "comments": row.get("comments") or "",
+                "select_for_po": frappe.utils.cint(row.get("select_for_po") or 0),
+                "custom_wastage_percentage": frappe.utils.flt(row.get("custom_wastage_percentage") or 0),
+                "custom_wastage_qty": frappe.utils.flt(row.get("custom_wastage_qty") or 0),
+                "extra_qty": frappe.utils.flt(row.get("extra_qty") or 0),
+                "po_qty": frappe.utils.flt(row.get("po_qty") or row.get("qty") or 0),
+            }
+        )
+    return out
+
+
+@frappe.whitelist()
+def append_po_items_to_sales_order(source_name=None, rows=None):
+    if not source_name:
+        frappe.throw("Sales Order is required")
+
+    sales_order = frappe.get_doc("Sales Order", source_name)
+    if sales_order.docstatus == 2:
+        frappe.throw("Cancelled Sales Order is not allowed")
+
+    parsed_rows = _coerce_po_item_rows(rows)
+    if not parsed_rows:
+        frappe.throw("No valid PO item rows provided")
+
+    saved_names = []
+    for payload in parsed_rows:
+        row = sales_order.append("custom_po_item", {})
+        row.item = payload.get("item_code")
+        row.supplier = payload.get("supplier") or ""
+        row.warehouse = payload.get("warehouse") or ""
+        row.rate = payload.get("rate") or 0
+        row.qty = payload.get("qty") or 0
+        row.custom_base_qty = payload.get("base_qty") or 0
+        row.descriptions = payload.get("descriptions") or ""
+        row.comments = payload.get("comments") or ""
+        row.select_for_po = payload.get("select_for_po") or 0
+        row.custom_wastage_percentage = payload.get("custom_wastage_percentage") or 0
+        row.custom_wastage_qty = payload.get("custom_wastage_qty") or 0
+        row.custom_extra_qty = payload.get("extra_qty") or 0
+        row.custom_po_qty = payload.get("po_qty") or payload.get("qty") or 0
+        saved_names.append(row.name)
+
+    sales_order.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    refreshed = frappe.get_doc("Sales Order", source_name)
+    refreshed_names = [row.name for row in (refreshed.get("custom_po_item") or []) if row.name]
+    resolved = [name for name in refreshed_names if name in saved_names]
+
+    if not resolved:
+        # Fallback: return the newest appended rows by count.
+        resolved = refreshed_names[-len(parsed_rows):]
+
+    return {
+        "row_names": resolved,
+        "row_count": len(resolved),
+    }
+
+
 @frappe.whitelist()
 def create_po_from_sales_order_po_tab(source_name=None, row_names=None):
     if not source_name:

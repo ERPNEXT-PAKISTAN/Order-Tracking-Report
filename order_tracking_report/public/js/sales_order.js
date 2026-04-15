@@ -2793,74 +2793,43 @@ function open_po_item_data_entry(frm, prefill) {
     }).css({ background: "#2563eb", border: "1px solid #1d4ed8", color: "#fff", fontWeight: "700" });
   }
 
-  function insert_rows_into_po_table() {
+  async function persist_inserted_rows() {
     sync_items_from_grid({ blurActive: true });
     if (!items_data.length) {
       frappe.msgprint(__("Add at least one row."));
-      return { insertedRows: [], previousCount: (frm.doc.custom_po_item || []).length };
-    }
-
-    const previousCount = (frm.doc.custom_po_item || []).length;
-    const insertedRows = [];
-    items_data.forEach((r) => {
-      const row = frappe.model.add_child(frm.doc, "Item PO", "custom_po_item");
-      row.item = r.item_code;
-      row.supplier = r.supplier || "";
-      row.warehouse = r.warehouse || "";
-      row.rate = toNum(r.rate);
-      row.qty = toNum(r.po_qty || r.qty);
-      row.custom_base_qty = toNum(r.base_qty);
-      row.descriptions = r.descriptions || "";
-      row.comments = r.comments || "";
-      row.select_for_po = toInt(r.select_for_po);
-      row.custom_wastage_percentage = toNum(r.custom_wastage_percentage);
-      row.custom_wastage_qty = toNum(r.custom_wastage_qty);
-      row.custom_extra_qty = toNum(r.extra_qty);
-      row.custom_po_qty = toNum(r.po_qty || r.qty);
-      insertedRows.push(row);
-    });
-    frm.refresh_field("custom_po_item");
-    return { insertedRows, previousCount };
-  }
-
-  async function persist_inserted_rows() {
-    const { insertedRows, previousCount } = insert_rows_into_po_table();
-    if (!insertedRows.length) {
       return [];
     }
 
     try {
-      if (frm.doc.docstatus === 1) {
-        await frm.save("Update");
-      } else {
-        await frm.save();
+      const response = await frappe.call({
+        method: "order_tracking_report.api.append_po_items_to_sales_order",
+        args: {
+          source_name: frm.doc.name,
+          rows: JSON.stringify(items_data),
+        },
+        freeze: true,
+        freeze_message: __("Saving PO rows..."),
+      });
+      await frm.reload_doc();
+      const rowNames = ((response && response.message && response.message.row_names) || []).filter(Boolean);
+      if (!rowNames.length) {
+        frappe.msgprint({
+          title: __("Unable to Resolve PO Rows"),
+          indicator: "red",
+          message: __("The PO rows were saved in the PO tab, but their saved row names could not be resolved for the next action."),
+        });
+        return [];
       }
+      return rowNames;
     } catch (error) {
       frappe.msgprint({
         title: __("Unable to Save Sales Order"),
         indicator: "red",
-        message: __("Rows were added to the PO Item table, but the Sales Order could not be saved. Fix the Sales Order and try again."),
+        message: __("PO rows could not be saved to the Sales Order. Fix the Sales Order and try again."),
       });
       console.error(error);
       return [];
     }
-
-    const currentRows = frm.doc.custom_po_item || [];
-    const insertedRowNames = currentRows
-      .slice(previousCount, previousCount + insertedRows.length)
-      .map((row) => row && row.name)
-      .filter(Boolean);
-
-    if (!insertedRowNames.length) {
-      frappe.msgprint({
-        title: __("Unable to Resolve PO Rows"),
-        indicator: "red",
-        message: __("The PO rows were saved in the PO tab, but their saved row names could not be resolved for the next action."),
-      });
-      return [];
-    }
-
-    return insertedRowNames;
   }
 
   async function create_po_and_add_in_table() {
