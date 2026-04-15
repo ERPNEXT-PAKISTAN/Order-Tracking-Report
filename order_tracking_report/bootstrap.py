@@ -7,6 +7,7 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 def ensure_item_po_setup():
     ensure_wastage_doctype()
     ensure_wastage_doctype_fields()
+    remove_legacy_wastage_fields()
     ensure_sales_order_wastage_mode_fields()
     ensure_sales_order_po_tab_fields()
     ensure_item_po_doctype()
@@ -358,15 +359,24 @@ def ensure_wastage_doctype():
             "engine": "InnoDB",
             "fields": [
                 {
-                    "fieldname": "item",
-                    "label": "Item",
+                    "fieldname": "item_group",
+                    "label": "Item Group",
                     "fieldtype": "Link",
-                    "options": "Item",
+                    "options": "Item Group",
                     "in_list_view": 1,
                     "columns": 2,
                 },
-                {"fieldname": "qty", "label": "Qty", "fieldtype": "Float", "columns": 1},
-                {"fieldname": "remarks", "label": "Remarks", "fieldtype": "Data", "columns": 2},
+                {"fieldname": "wastage", "label": "Wastage", "fieldtype": "Float", "in_list_view": 1, "columns": 1},
+                {"fieldname": "manual", "label": "Manual", "fieldtype": "Float", "in_list_view": 1, "columns": 1},
+                {"fieldname": "po", "label": "PO", "fieldtype": "Float", "in_list_view": 1, "columns": 1},
+                {
+                    "fieldname": "source",
+                    "label": "Source",
+                    "fieldtype": "Select",
+                    "options": "\nWastage\nManual\nPO",
+                    "in_list_view": 1,
+                    "columns": 1,
+                },
             ],
             "permissions": [],
         }
@@ -377,6 +387,9 @@ def ensure_wastage_doctype():
 def ensure_wastage_doctype_fields():
     if not frappe.db.exists("DocType", "Wastage"):
         return
+
+    if frappe.db.get_value("DocType", "Wastage", "module") != "Order Tracking Report":
+        frappe.db.set_value("DocType", "Wastage", "module", "Order Tracking Report", update_modified=False)
 
     required_fields = [
         {"fieldname": "item_group", "label": "Item Group", "fieldtype": "Link", "options": "Item Group"},
@@ -410,9 +423,6 @@ def ensure_wastage_doctype_fields():
 
     # Normalize previously-created field definitions (older versions had Data/Check types).
     normalize = {
-        "item": {"fieldtype": "Link", "options": "Item", "in_list_view": 1, "columns": 2},
-        "qty": {"fieldtype": "Float", "columns": 1},
-        "remarks": {"fieldtype": "Data", "columns": 2},
         "item_group": {"fieldtype": "Link", "options": "Item Group", "in_list_view": 1, "columns": 2},
         "wastage": {"fieldtype": "Float", "in_list_view": 1, "columns": 1},
         "manual": {"fieldtype": "Float", "in_list_view": 1, "columns": 1},
@@ -421,10 +431,14 @@ def ensure_wastage_doctype_fields():
     }
     for fn, cfg in normalize.items():
         df_name = frappe.db.get_value("DocField", {"parent": "Wastage", "fieldname": fn}, "name")
+        target_doctype = "DocField"
+        if not df_name:
+            df_name = frappe.db.get_value("Custom Field", {"dt": "Wastage", "fieldname": fn}, "name")
+            target_doctype = "Custom Field"
         if not df_name:
             continue
         for k, v in cfg.items():
-            frappe.db.set_value("DocField", df_name, k, v, update_modified=False)
+            frappe.db.set_value(target_doctype, df_name, k, v, update_modified=False)
 
     # Ensure physical DB column types are numeric too (older setups had
     # varchar/check columns, which breaks non-global wastage calculations).
@@ -453,6 +467,29 @@ def ensure_wastage_doctype_fields():
                 continue
     except Exception:
         pass
+
+
+def remove_legacy_wastage_fields():
+    if not frappe.db.exists("DocType", "Wastage"):
+        return
+
+    legacy_fields = {"item", "qty", "remarks"}
+
+    try:
+        doctype = frappe.get_doc("DocType", "Wastage")
+    except Exception:
+        return
+
+    remaining_fields = [field for field in (doctype.fields or []) if field.fieldname not in legacy_fields]
+    if len(remaining_fields) == len(doctype.fields or []):
+        return
+
+    doctype.fields = remaining_fields
+    doctype.module = "Order Tracking Report"
+    doctype.istable = 1
+    doctype.editable_grid = 1
+    doctype.save(ignore_permissions=True)
+    frappe.clear_document_cache("DocType", "Wastage")
 
 
 def ensure_sales_order_wastage_mode_fields():
