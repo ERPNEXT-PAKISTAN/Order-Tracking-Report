@@ -8,6 +8,7 @@ def ensure_item_po_setup():
     ensure_wastage_doctype()
     ensure_wastage_doctype_fields()
     ensure_sales_order_wastage_mode_fields()
+    ensure_sales_order_po_tab_fields()
     ensure_item_po_doctype()
     ensure_item_po_fields()
     ensure_purchase_order_item_tracking_fields()
@@ -15,10 +16,62 @@ def ensure_item_po_setup():
     ensure_sales_order_po_tab_field_order()
 
 
+def ensure_sales_order_po_tab_fields():
+    custom_fields = {
+        "Sales Order": [
+            {
+                "fieldname": "custom_section_break_hvvut",
+                "label": "",
+                "fieldtype": "Section Break",
+                "insert_after": "custom_wastages",
+            },
+            {
+                "fieldname": "custom_detail_status",
+                "label": "Detail Status",
+                "fieldtype": "HTML",
+                "insert_after": "custom_section_break_hvvut",
+            },
+            {
+                "fieldname": "custom_po",
+                "label": "PO",
+                "fieldtype": "Tab Break",
+                "insert_after": "custom_detail_status",
+            },
+            {
+                "fieldname": "custom_section_break_0tn3c",
+                "label": "",
+                "fieldtype": "Section Break",
+                "insert_after": "custom_po",
+            },
+            {
+                "fieldname": "custom_po_item",
+                "label": "PO Item",
+                "fieldtype": "Table",
+                "options": "Item PO",
+                "insert_after": "custom_section_break_0tn3c",
+                "allow_on_submit": 1,
+            },
+            {
+                "fieldname": "custom_po_remarks",
+                "label": "PO Remarks",
+                "fieldtype": "Small Text",
+                "insert_after": "custom_po_item",
+                "allow_on_submit": 1,
+            },
+        ]
+    }
+    create_custom_fields(custom_fields, update=True)
+
+
 def ensure_sales_order_po_tab_field_order():
     setter = frappe.db.get_value(
         "Property Setter",
-        {"doc_type": "Sales Order", "property": "field_order", "field_name": ["is", "not set"]},
+        "Sales Order-main-field_order",
+        ["name", "value"],
+        as_dict=True,
+    ) or frappe.db.get_value(
+        "Property Setter",
+        {"doc_type": "Sales Order", "property": "field_order"},
         ["name", "value"],
         as_dict=True,
     )
