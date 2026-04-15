@@ -2298,6 +2298,10 @@ function create_po_from_rows(frm, row_names, options) {
   }).then((r) => {
     const created = Array.isArray(r.message) ? r.message : [];
     frm.reload_doc();
+    setTimeout(() => {
+      if (frm.refresh_field) frm.refresh_field("custom_po_item");
+      if (frm.scroll_to_field) frm.scroll_to_field("custom_po_item");
+    }, 300);
 
     if (!created.length) {
       return created;
@@ -2890,6 +2894,10 @@ function open_po_item_data_entry(frm, prefill) {
 
     frappe.show_alert({ message: __("Rows inserted in PO Item table"), indicator: "green" }, 4);
     dialog.hide();
+    setTimeout(() => {
+      if (frm.refresh_field) frm.refresh_field("custom_po_item");
+      if (frm.scroll_to_field) frm.scroll_to_field("custom_po_item");
+    }, 150);
   });
 
   dialog.show();
