@@ -1,3 +1,5 @@
+import json
+
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
@@ -10,6 +12,46 @@ def ensure_item_po_setup():
     ensure_item_po_fields()
     ensure_purchase_order_item_tracking_fields()
     ensure_allow_on_submit_for_po_fields()
+    ensure_sales_order_po_tab_field_order()
+
+
+def ensure_sales_order_po_tab_field_order():
+    setter = frappe.db.get_value(
+        "Property Setter",
+        {"doc_type": "Sales Order", "property": "field_order", "field_name": ["is", "not set"]},
+        ["name", "value"],
+        as_dict=True,
+    )
+    if not setter or not setter.get("name"):
+        return
+
+    try:
+        field_order = json.loads(setter.get("value") or "[]")
+    except Exception:
+        return
+
+    if not isinstance(field_order, list) or not field_order:
+        return
+
+    tail_fields = [
+        "custom_section_break_hvvut",
+        "custom_detail_status",
+        "custom_po",
+        "custom_section_break_0tn3c",
+        "custom_po_item",
+        "custom_po_remarks",
+    ]
+    reordered = [fieldname for fieldname in field_order if fieldname not in tail_fields]
+    reordered.extend(tail_fields)
+
+    if reordered != field_order:
+        frappe.db.set_value(
+            "Property Setter",
+            setter.get("name"),
+            "value",
+            json.dumps(reordered),
+            update_modified=False,
+        )
 
 
 def ensure_sales_order_live_shortcuts():
