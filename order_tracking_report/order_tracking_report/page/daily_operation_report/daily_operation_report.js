@@ -16,8 +16,7 @@ window.order_tracking_report.DailyOperationReportPage = class DailyOperationRepo
 		frappe.route_options = null;
 		this.chart = null;
 		this.filters = [];
-		this.columns = [];
-		this.data = [];
+		this.rows = [];
 
 		frappe.ui.make_app_page({
 			parent: wrapper,
@@ -43,29 +42,19 @@ window.order_tracking_report.DailyOperationReportPage = class DailyOperationRepo
 			<div class="otr-daily-operation-page">
 				<div style="padding:18px;border:1px solid #d1fae5;border-radius:16px;background:linear-gradient(135deg,#ecfdf5 0%,#f8fffb 100%);margin-bottom:16px;">
 					<div style="font-size:20px;font-weight:900;color:#064e3b;">${__(this.reportName)}</div>
-					<div style="margin-top:6px;font-size:13px;color:#065f46;font-weight:700;">${__("Daily Production report with filters, grouping, summary, and chart inside this page.")}</div>
+					<div style="margin-top:6px;font-size:13px;color:#065f46;font-weight:700;">${__("Sales Order wise operation matrix grouped by item, inside this page.")}</div>
 					<div class="text-muted small" data-report-status style="margin-top:10px;">${__("Ready.")}</div>
 				</div>
 				<div data-summary style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px;"></div>
-				<div data-chart-wrapper style="border:1px solid #e5e7eb;border-radius:16px;background:#fff;padding:12px 16px;margin-bottom:16px;display:none;">
-					<div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:10px;">${__("Production Trend")}</div>
-					<div data-chart style="min-height:260px;"></div>
-				</div>
-				<div style="border:1px solid #e5e7eb;border-radius:16px;background:#fff;overflow:auto;">
-					<table class="table table-bordered" style="margin:0;">
-						<thead data-table-head></thead>
-						<tbody data-table-body></tbody>
-					</table>
+				<div style="border:1px solid #e5e7eb;border-radius:16px;background:#fff;overflow:hidden;">
+					<div data-matrix-container style="overflow:auto;"></div>
 				</div>
 			</div>
 		`);
 
 		this.$status = this.$root.find("[data-report-status]");
 		this.$summary = this.$root.find("[data-summary]");
-		this.$chartWrapper = this.$root.find("[data-chart-wrapper]");
-		this.$chart = this.$root.find("[data-chart]");
-		this.$tableHead = this.$root.find("[data-table-head]");
-		this.$tableBody = this.$root.find("[data-table-body]");
+		this.$matrixContainer = this.$root.find("[data-matrix-container]");
 	}
 
 	setupFilters() {
@@ -157,9 +146,10 @@ window.order_tracking_report.DailyOperationReportPage = class DailyOperationRepo
 				fieldname: "group_by",
 				label: __("Group By"),
 				fieldtype: "Select",
-				options: ["None", "Date", "Sales Order Number", "Item", "Operation", "Employee"],
-				default: "Sales Order Number",
+				options: ["Sales Order Number by Item"],
+				default: "Sales Order Number by Item",
 				reqd: 1,
+				read_only: 1,
 			},
 			{
 				fieldname: "hide_zero_qty",
@@ -201,18 +191,16 @@ window.order_tracking_report.DailyOperationReportPage = class DailyOperationRepo
 				type: "GET",
 				args: {
 					report_name: this.reportName,
-					filters: this.getFilters(),
+					filters: { ...this.getFilters(), group_by: "None" },
 					ignore_prepared_report: 1,
 					is_tree: 0,
 				},
 			});
 
 			const payload = response.message || {};
-			this.columns = payload.columns || [];
-			this.data = payload.result || [];
+			this.rows = payload.result || [];
 			this.renderSummary(payload.report_summary || []);
-			this.renderChart(payload.chart || null);
-			this.renderTable(this.columns, this.data);
+			this.renderMatrix(this.rows);
 			this.$status.text(__("Report loaded."));
 		} catch (error) {
 			console.error(error);
@@ -244,93 +232,136 @@ window.order_tracking_report.DailyOperationReportPage = class DailyOperationRepo
 		this.$summary.html(cards.join(""));
 	}
 
-	renderChart(chartOptions) {
-		if (!chartOptions || !chartOptions.data || !chartOptions.data.labels || !chartOptions.data.labels.length) {
-			this.$chartWrapper.hide();
-			this.$chart.empty();
-			this.chart = null;
+	renderMatrix(rows) {
+		const detailRows = (rows || []).filter((row) => !row.bold && !this.isBlankRow(row));
+		if (!detailRows.length) {
+			this.$matrixContainer.html(`<div style="padding:16px;">${__("No data found.")}</div>`);
 			return;
 		}
 
-		this.$chartWrapper.show();
-		this.$chart.empty();
-		this.chart = new frappe.Chart(this.$chart.get(0), {
-			data: chartOptions.data,
-			type: chartOptions.type || "line",
-			height: 260,
-			colors: ["#059669"],
+		const operations = this.getOperations(detailRows);
+		const grouped = this.groupRows(detailRows, operations);
+		const matrixHtml = [`
+			<table class="table table-bordered" style="margin:0;min-width:${Math.max(680, 180 + operations.length * 130)}px;">
+				<thead>
+					<tr>
+						<th style="min-width:180px;"></th>
+						<th colspan="${operations.length}" style="text-align:center;color:#1d4ed8;font-weight:800;">${__("Operations")}</th>
+					</tr>
+					<tr>
+						<th>${__("Date")}</th>
+						${operations.map((operation) => `<th style="text-align:center;color:#1d4ed8;font-weight:800;">${frappe.utils.escape_html(operation)}</th>`).join("")}
+					</tr>
+				</thead>
+				<tbody>
+		`];
+
+		grouped.forEach((salesOrderGroup) => {
+			matrixHtml.push(`
+				<tr>
+					<td colspan="${operations.length + 1}" style="background:#0f4c1d;color:#fff;font-weight:800;">${frappe.utils.escape_html(salesOrderGroup.salesOrder)}</td>
+				</tr>
+			`);
+
+			salesOrderGroup.items.forEach((itemGroup) => {
+				matrixHtml.push(`
+					<tr>
+						<td colspan="${operations.length + 1}" style="background:#f8fafc;color:#0f172a;font-weight:700;">${frappe.utils.escape_html(itemGroup.item)}</td>
+					</tr>
+				`);
+
+				itemGroup.rows.forEach((dateRow) => {
+					matrixHtml.push(`
+						<tr>
+							<td>${frappe.utils.escape_html(this.formatDate(dateRow.date))}</td>
+							${operations.map((operation) => `<td style="text-align:center;">${this.formatValue(dateRow.operationQty[operation] || 0, "Float")}</td>`).join("")}
+						</tr>
+					`);
+				});
+
+				matrixHtml.push(`
+					<tr>
+						<td style="font-weight:800;color:#1d4ed8;">${__("Total Qty")}</td>
+						${operations.map((operation) => `<td style="text-align:center;font-weight:800;color:#1d4ed8;">${this.formatValue(itemGroup.totals[operation] || 0, "Float")}</td>`).join("")}
+					</tr>
+				`);
+			});
 		});
+
+		matrixHtml.push("</tbody></table>");
+		this.$matrixContainer.html(matrixHtml.join(""));
 	}
 
-	renderTable(columns, rows) {
-		if (!columns.length) {
-			this.$tableHead.html("");
-			this.$tableBody.html(`<tr><td style="padding:16px;" colspan="1">${__("No columns returned.")}</td></tr>`);
-			return;
-		}
+	getOperations(rows) {
+		const operations = [];
+		rows.forEach((row) => {
+			const operation = (row.operation || "").trim();
+			if (operation && !operations.includes(operation)) {
+				operations.push(operation);
+			}
+		});
+		return operations;
+	}
 
-		this.$tableHead.html(`<tr>${columns.map((column) => `<th style="white-space:nowrap;">${frappe.utils.escape_html(__(column.label || column.fieldname || ""))}</th>`).join("")}</tr>`);
+	groupRows(rows, operations) {
+		const salesOrderMap = new Map();
+		rows.forEach((row) => {
+			const salesOrder = (row.sales_order || "No Sales Order").trim() || "No Sales Order";
+			const item = (row.item || "No Item").trim() || "No Item";
+			const dateKey = this.normalizeDateKey(row.group_or_date);
+			const operation = (row.operation || "No Operation").trim() || "No Operation";
+			const qty = this.toNumber(row.qty);
 
-		if (!rows.length) {
-			this.$tableBody.html(`<tr><td style="padding:16px;" colspan="${columns.length}">${__("No data found.")}</td></tr>`);
-			return;
-		}
-
-		const bodyHtml = rows.map((row) => {
-			const isBlank = Object.keys(row || {}).every((key) => row[key] === "" || row[key] === null || row[key] === undefined);
-			if (isBlank) {
-				return `<tr><td colspan="${columns.length}" style="padding:8px;background:#f8fafc;"></td></tr>`;
+			if (!salesOrderMap.has(salesOrder)) {
+				salesOrderMap.set(salesOrder, new Map());
 			}
 
-			const cells = columns.map((column) => {
-				const rawValue = row[column.fieldname];
-				const content = this.renderCell(row, column, rawValue);
-				const style = [];
-				if (column.fieldname === "group_value" && row.indent) {
-					style.push(`padding-left:${16 + row.indent * 18}px`);
-				}
-				if (row.bold) {
-					style.push("font-weight:700");
-				}
-				return `<td style="${style.join(";")}">${content}</td>`;
-			}).join("");
+			const itemMap = salesOrderMap.get(salesOrder);
+			if (!itemMap.has(item)) {
+				itemMap.set(item, new Map());
+			}
 
-			return `<tr>${cells}</tr>`;
-		}).join("");
+			const dateMap = itemMap.get(item);
+			if (!dateMap.has(dateKey)) {
+				dateMap.set(dateKey, { date: dateKey, operationQty: {} });
+			}
 
-		this.$tableBody.html(bodyHtml);
-		this.bindLinkClicks();
+			const dateEntry = dateMap.get(dateKey);
+			dateEntry.operationQty[operation] = (dateEntry.operationQty[operation] || 0) + qty;
+		});
+
+		return Array.from(salesOrderMap.entries()).map(([salesOrder, itemMap]) => ({
+			salesOrder,
+			items: Array.from(itemMap.entries()).map(([item, dateMap]) => {
+				const rowsForItem = Array.from(dateMap.values()).sort((left, right) => right.date.localeCompare(left.date));
+				const totals = {};
+				operations.forEach((operation) => {
+					totals[operation] = rowsForItem.reduce(
+						(sum, row) => sum + this.toNumber(row.operationQty[operation]),
+						0
+					);
+				});
+				return { item, rows: rowsForItem, totals };
+			}),
+		}));
 	}
 
-	renderCell(row, column, value) {
-		if (value === null || value === undefined) {
+	isBlankRow(row) {
+		return Object.keys(row || {}).every((key) => row[key] === "" || row[key] === null || row[key] === undefined);
+	}
+
+	normalizeDateKey(value) {
+		if (!value) {
 			return "";
 		}
-
-		if (column.fieldtype === "Link" && value) {
-			return `<a href="#" data-link-doctype="${frappe.utils.escape_html(column.options || "")}" data-link-name="${frappe.utils.escape_html(String(value))}">${frappe.utils.escape_html(String(value))}</a>`;
-		}
-
-		if (column.fieldtype === "Date") {
-			return frappe.format(value, { fieldtype: "Date" }, { always_show_decimals: false });
-		}
-
-		if (column.fieldtype === "Float") {
-			return this.formatValue(value, "Float");
-		}
-
-		return frappe.utils.escape_html(String(value));
+		return String(value).slice(0, 10);
 	}
 
-	bindLinkClicks() {
-		this.$tableBody.find("[data-link-doctype][data-link-name]").off("click").on("click", function (event) {
-			event.preventDefault();
-			const doctype = $(this).attr("data-link-doctype");
-			const name = $(this).attr("data-link-name");
-			if (doctype && name) {
-				frappe.set_route("Form", doctype, name);
-			}
-		});
+	formatDate(value) {
+		if (!value) {
+			return "";
+		}
+		return frappe.format(value, { fieldtype: "Date" }, { always_show_decimals: false });
 	}
 
 	formatValue(value, datatype) {
@@ -341,5 +372,10 @@ window.order_tracking_report.DailyOperationReportPage = class DailyOperationRepo
 			return frappe.format(value || 0, { fieldtype: "Int" }, { always_show_decimals: false });
 		}
 		return frappe.utils.escape_html(String(value ?? ""));
+	}
+
+	toNumber(value) {
+		const parsed = Number(value || 0);
+		return Number.isFinite(parsed) ? parsed : 0;
 	}
 };

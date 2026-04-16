@@ -52,8 +52,8 @@ frappe.query_reports["Daily Operation Report"] = {
       fieldname: "group_by",
       label: __("Group By"),
       fieldtype: "Select",
-      options: ["None", "Date", "Sales Order Number", "Item", "Operation", "Employee"],
-      default: "Sales Order Number",
+      options: ["None", "Date", "Sales Order", "Item", "Operation", "Employee"],
+      default: "Date",
       reqd: 1,
     },
     {

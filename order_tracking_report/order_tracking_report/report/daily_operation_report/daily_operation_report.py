@@ -3,7 +3,7 @@ from __future__ import annotations
 import frappe
 
 
-VALID_GROUP_BY = {"None", "Date", "Sales Order Number", "Item", "Operation", "Employee"}
+VALID_GROUP_BY = {"None", "Date", "Sales Order", "Item", "Operation", "Employee"}
 
 
 def execute(filters=None):
@@ -28,31 +28,45 @@ def normalize_filters(filters):
     if filters.get("from_date") and filters.get("to_date") and filters.get("from_date") > filters.get("to_date"):
         filters["to_date"] = filters.get("from_date")
 
-    group_by = (filters.get("group_by") or "Sales Order Number").strip()
+    group_by = (filters.get("group_by") or "Date").strip()
     if group_by not in VALID_GROUP_BY:
-        group_by = "Sales Order Number"
+        group_by = "Date"
     filters["group_by"] = group_by
 
 
 def get_columns():
     return [
         {
-            "label": "Group",
-            "fieldname": "group_value",
+            "label": "Group / Date",
+            "fieldname": "group_or_date",
             "fieldtype": "Data",
-            "width": 220,
+            "width": 160,
         },
         {
-            "label": "Date",
-            "fieldname": "date",
-            "fieldtype": "Date",
-            "width": 120,
+            "label": "Daily Production",
+            "fieldname": "daily_production",
+            "fieldtype": "Link",
+            "options": "Daily Production",
+            "width": 170,
         },
         {
-            "label": "Sales Order Number",
+            "label": "Sales Order",
             "fieldname": "sales_order",
             "fieldtype": "Link",
             "options": "Sales Order",
+            "width": 170,
+        },
+        {
+            "label": "Company",
+            "fieldname": "company",
+            "fieldtype": "Link",
+            "options": "Company",
+            "width": 170,
+        },
+        {
+            "label": "Customer",
+            "fieldname": "customer",
+            "fieldtype": "Data",
             "width": 170,
         },
         {
@@ -67,6 +81,12 @@ def get_columns():
             "fieldname": "operation",
             "fieldtype": "Link",
             "options": "Operation",
+            "width": 150,
+        },
+        {
+            "label": "Employee",
+            "fieldname": "employee",
+            "fieldtype": "Data",
             "width": 150,
         },
         {
@@ -160,11 +180,14 @@ def build_grouped_rows(rows, group_by):
 
         output.append(
             {
-                "group_value": key,
-                "date": None,
+                "group_or_date": key,
+                "daily_production": "",
                 "sales_order": "",
+                "company": "",
+                "customer": "",
                 "item": "",
                 "operation": "",
+                "employee": "",
                 "qty": total_qty,
                 "indent": 0,
                 "bold": 1,
@@ -173,12 +196,24 @@ def build_grouped_rows(rows, group_by):
 
         for child in children:
             detail = to_detail_row(child)
-            detail["group_value"] = ""
+            detail["group_or_date"] = ""
             detail["indent"] = 1
             output.append(detail)
 
         if index < len(sorted_keys) - 1:
-            output.append({"group_value": "", "date": None, "sales_order": "", "item": "", "operation": "", "qty": None})
+            output.append(
+                {
+                    "group_or_date": "",
+                    "daily_production": "",
+                    "sales_order": "",
+                    "company": "",
+                    "customer": "",
+                    "item": "",
+                    "operation": "",
+                    "employee": "",
+                    "qty": None,
+                }
+            )
 
     return output
 
@@ -186,11 +221,14 @@ def build_grouped_rows(rows, group_by):
 def to_detail_row(row):
     sales_order = (row.get("parent_sales_order") or row.get("child_sales_order") or "").strip()
     return {
-        "group_value": "",
-        "date": row.get("work_date"),
+        "group_or_date": row.get("work_date"),
+        "daily_production": row.get("daily_production"),
         "sales_order": sales_order,
+        "company": row.get("company"),
+        "customer": row.get("customer"),
         "item": row.get("item"),
         "operation": row.get("operation"),
+        "employee": row.get("employee"),
         "qty": to_float(row.get("qty")),
     }
 
@@ -198,7 +236,7 @@ def to_detail_row(row):
 def get_group_key(row, group_by):
     if group_by == "Date":
         return frappe.format_value(row.get("work_date"), {"fieldtype": "Date"}) or "No Date"
-    if group_by == "Sales Order Number":
+    if group_by == "Sales Order":
         return (row.get("parent_sales_order") or row.get("child_sales_order") or "No Sales Order").strip()
     if group_by == "Item":
         return (row.get("item") or "No Item").strip()
