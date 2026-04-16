@@ -13,7 +13,7 @@ frappe.pages["daily-operation-report"].on_page_load = function (wrapper) {
 
 	const routeOptions = frappe.route_options || {};
 	frappe.route_options = null;
-	const reportUrl = getReportUrl(reportName);
+	const reportUrl = getReportUrl(reportName, routeOptions);
 
 	const $pageBody = $(
 		`<div class="otr-helper-page">
@@ -21,46 +21,56 @@ frappe.pages["daily-operation-report"].on_page_load = function (wrapper) {
 				<div style="font-size:20px;font-weight:900;color:#064e3b;">${__(reportName)}</div>
 				<div style="margin-top:6px;font-size:13px;color:#065f46;font-weight:700;">${__("Open the Daily Production report with filters, grouping, chart, and summary.")}</div>
 				<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-					<button class="btn btn-primary btn-sm" data-open-report>${__("Open Report")}</button>
-					<a class="btn btn-default btn-sm" href="${reportUrl}">${__("Open Direct")}</a>
+					<button class="btn btn-primary btn-sm" data-reload-report>${__("Reload Report")}</button>
+					<a class="btn btn-default btn-sm" href="${reportUrl}" target="_blank" rel="noopener noreferrer">${__("Open Direct")}</a>
 				</div>
-				<div class="text-muted small" data-report-status style="margin-top:10px;">${__("Preparing report page...")}</div>
+				<div class="text-muted small" data-report-status style="margin-top:10px;">${__("Loading report...")}</div>
+			</div>
+			<div style="border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#fff;min-height:75vh;">
+				<iframe
+					data-report-frame
+					src="${reportUrl}"
+					style="width:100%;height:75vh;border:0;display:block;background:#fff;"
+					loading="eager"
+				></iframe>
 			</div>
 		</div>`
 	);
 
 	$root.empty().append($pageBody);
 	const $status = $pageBody.find("[data-report-status]");
+	const reportFrame = $pageBody.find("[data-report-frame]").get(0);
 
-	const openReport = () => {
-		$status.text(__("Opening report..."));
-		const currentLocation = `${window.location.pathname}${window.location.hash || ""}`;
-		try {
-			frappe.route_options = routeOptions;
-			frappe.set_route("query-report", reportName);
-		} catch (error) {
-			window.location.href = reportUrl;
-			return;
-		}
-
-		setTimeout(() => {
-			const nextLocation = `${window.location.pathname}${window.location.hash || ""}`;
-			if (nextLocation === currentLocation) {
-				window.location.href = reportUrl;
-			}
-		}, 250);
+	const loadEmbeddedReport = () => {
+		$status.text(__("Loading report..."));
+		reportFrame.src = getReportUrl(reportName, routeOptions);
 	};
 
-	page.set_primary_action(__("Open Report"), openReport, "go-to");
-	$pageBody.find("[data-open-report]").on("click", openReport);
+	reportFrame.addEventListener("load", () => {
+		$status.text(__("Report loaded."));
+	});
 
-	setTimeout(openReport, 150);
+	page.set_primary_action(__("Reload Report"), loadEmbeddedReport, "refresh");
+	$pageBody.find("[data-reload-report]").on("click", loadEmbeddedReport);
 };
 
-function getReportUrl(reportName) {
+function getReportUrl(reportName, routeOptions) {
 	const encodedReportName = encodeURIComponent(reportName);
+	const queryString = buildQueryString(routeOptions || {});
 	if ((window.location.pathname || "").startsWith("/desk")) {
-		return `/desk#query-report/${encodedReportName}`;
+		return `/desk#query-report/${encodedReportName}${queryString}`;
 	}
-	return `/app/query-report/${encodedReportName}`;
+	return `/app/query-report/${encodedReportName}${queryString}`;
+}
+
+function buildQueryString(routeOptions) {
+	const queryParams = new URLSearchParams();
+	Object.entries(routeOptions || {}).forEach(([key, value]) => {
+		if (value === undefined || value === null || value === "") {
+			return;
+		}
+		queryParams.append(key, value);
+	});
+	const serialized = queryParams.toString();
+	return serialized ? `?${serialized}` : "";
 }
