@@ -615,10 +615,13 @@ def create_or_update_delivery_note_print_format():
         {% set pcs_per_ctn = (row.custom_pcs_per_ctn or frappe.db.get_value("Item", row.item_code, "custom_pcs_per_ctn") or 0) | float %}
         {% set ctn = (row.custom_ctn if row.custom_ctn is not none else ((row.qty or 0) / pcs_per_ctn if pcs_per_ctn else 0)) | float %}
         {% set total_pcs = (row.qty or 0) | float %}
+        {# CHANGE ITEM TEXT HERE if you want Description instead of Comments. #}
+        {# Current priority: custom_comments -> description -> comments -> item_name -> item_code #}
+        {% set item_text = row.custom_comments or row.description or row.comments or row.item_name or row.item_code or "" %}
         {% set ns_total.ctn = ns_total.ctn + ctn %}
         {% set ns_total.pcs = ns_total.pcs + total_pcs %}
         <tr>
-          <td class="dncr-item">{{ row.custom_comments or row.comments or row.item_name or row.item_code or "" }}</td>
+          <td class="dncr-item">{{ item_text }}</td>
           <td class="dncr-center">{{ row.custom_designcolor or ns.color or "" }}</td>
           <td class="dncr-center">{{ ns.size }}</td>
           <td class="dncr-center">{{ row.custom_carton_number_from or "" }}</td>
