@@ -110,6 +110,35 @@ def _aggregate_qty_by_item(rows):
     return qty_by_item
 
 
+@frappe.whitelist()
+def get_sales_order_items_for_daily_production(sales_order=None):
+    sales_order = (sales_order or "").strip()
+    if not sales_order:
+        frappe.throw("Sales Order is required")
+
+    if not frappe.db.exists("Sales Order", sales_order):
+        frappe.throw("Sales Order not found")
+
+    rows = frappe.get_all(
+        "Sales Order Item",
+        filters={"parent": sales_order, "parenttype": "Sales Order"},
+        fields=["name", "item_code", "item_name", "description", "qty", "uom"],
+        order_by="idx asc",
+    )
+
+    return [
+        {
+            "sales_order_item": row.get("name") or "",
+            "item_code": row.get("item_code") or "",
+            "item_name": row.get("item_name") or "",
+            "description": row.get("description") or "",
+            "qty": frappe.utils.flt(row.get("qty")),
+            "uom": row.get("uom") or "",
+        }
+        for row in rows
+    ]
+
+
 def _flatten_bom_rows(tree, selected_qty_by_item=None):
     rows = []
     selected_qty_by_item = selected_qty_by_item or {}
