@@ -10,6 +10,8 @@ PARENT_DOCTYPE = "Daily Production"
 CHILD_DOCTYPE = "Operation Process"
 SCRIPT_NAME = "Daily Production Sales Order Loader"
 
+DEFAULT_ROLES = ["System Manager", "Manufacturing User", "Sales User"]
+
 PARENT_CUSTOM_FIELDS = {
     PARENT_DOCTYPE: [
         {
@@ -58,17 +60,111 @@ LEGACY_CUSTOM_FIELDS = {
 
 
 def ensure_daily_production_setup() -> None:
+    ensure_daily_production_doctypes()
     remove_legacy_daily_production_custom_fields()
     ensure_daily_production_custom_fields()
     ensure_daily_production_field_order()
     ensure_daily_production_client_script()
 
 
+def ensure_daily_production_doctypes() -> None:
+    ensure_operation_process_doctype()
+    ensure_daily_production_doctype()
+
+
+def ensure_operation_process_doctype() -> None:
+    if frappe.db.exists("DocType", CHILD_DOCTYPE):
+        return
+
+    doc = frappe.get_doc(
+        {
+            "doctype": "DocType",
+            "name": CHILD_DOCTYPE,
+            "module": "Order Tracking Report",
+            "custom": 1,
+            "istable": 1,
+            "editable_grid": 1,
+            "engine": "InnoDB",
+            "fields": [
+                {"fieldname": "date", "label": "Date", "fieldtype": "Date"},
+                {"fieldname": "item", "label": "Item", "fieldtype": "Link", "options": "Item"},
+                {"fieldname": "operations", "label": "Operations", "fieldtype": "Link", "options": "Operation"},
+                {"fieldname": "qty", "label": "Qty", "fieldtype": "Float"},
+                {"fieldname": "employee", "label": "Employee", "fieldtype": "Data"},
+                {"fieldname": "sales_order", "label": "Sales Order", "fieldtype": "Data"},
+            ],
+            "permissions": [],
+        }
+    )
+    doc.insert(ignore_permissions=True)
+    frappe.clear_document_cache("DocType", CHILD_DOCTYPE)
+
+
+def ensure_daily_production_doctype() -> None:
+    if frappe.db.exists("DocType", PARENT_DOCTYPE):
+        return
+
+    doc = frappe.get_doc(
+        {
+            "doctype": "DocType",
+            "name": PARENT_DOCTYPE,
+            "module": "Order Tracking Report",
+            "custom": 1,
+            "autoname": "format:OP-.#####",
+            "engine": "InnoDB",
+            "sort_field": "creation",
+            "sort_order": "DESC",
+            "fields": [
+                {"fieldname": "section_break_ckse", "label": "", "fieldtype": "Section Break"},
+                {"fieldname": "date", "label": "Date", "fieldtype": "Date"},
+                {"fieldname": "column_break_aznq", "label": "", "fieldtype": "Column Break"},
+                {"fieldname": "sales_order", "label": "Sales Order", "fieldtype": "Link", "options": "Sales Order"},
+                {"fieldname": "column_break_nzqy", "label": "", "fieldtype": "Column Break"},
+                {"fieldname": "customer", "label": "Customer", "fieldtype": "Data", "fetch_from": "sales_order.customer"},
+                {"fieldname": "otr_column_break_item_group", "label": "", "fieldtype": "Column Break"},
+                {"fieldname": "item_group", "label": "Item Group", "fieldtype": "Link", "options": "Item Group"},
+                {"fieldname": "otr_column_break_company", "label": "", "fieldtype": "Column Break"},
+                {
+                    "fieldname": "company",
+                    "label": "Company",
+                    "fieldtype": "Link",
+                    "options": "Company",
+                    "fetch_from": "sales_order.company",
+                    "fetch_if_empty": 1,
+                },
+                {"fieldname": "section_break_items", "label": "", "fieldtype": "Section Break"},
+                {"fieldname": "operations", "label": "Operations", "fieldtype": "Table", "options": CHILD_DOCTYPE},
+                {"fieldname": "remarks", "label": "Remarks", "fieldtype": "Small Text"},
+            ],
+            "permissions": [
+                {
+                    "role": role,
+                    "read": 1,
+                    "write": 1,
+                    "create": 1,
+                    "delete": 1,
+                    "report": 1,
+                    "export": 1,
+                    "share": 1,
+                    "print": 1,
+                    "email": 1,
+                }
+                for role in DEFAULT_ROLES
+            ],
+        }
+    )
+    doc.insert(ignore_permissions=True)
+    frappe.clear_document_cache("DocType", PARENT_DOCTYPE)
+
+
 def ensure_daily_production_custom_fields() -> None:
     if not frappe.db.exists("DocType", PARENT_DOCTYPE):
         return
 
-    create_custom_fields(PARENT_CUSTOM_FIELDS, update=True)
+    meta = frappe.get_meta(PARENT_DOCTYPE)
+    missing_fields = [field for field in PARENT_CUSTOM_FIELDS[PARENT_DOCTYPE] if not meta.get_field(field["fieldname"])]
+    if missing_fields:
+        create_custom_fields({PARENT_DOCTYPE: missing_fields}, update=True)
 
 
 def remove_legacy_daily_production_custom_fields() -> None:
