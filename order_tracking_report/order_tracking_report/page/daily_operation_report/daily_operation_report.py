@@ -9,6 +9,13 @@ OPERATIONS_SEQUENCE = ["Cutting", "Stitching", "Packing", "Quilting"]
 @frappe.whitelist()
 def get_daily_operation_page_data(filters=None):
 	filters = frappe._dict(frappe.parse_json(filters) or {})
+	if not _has_daily_production_tables():
+		return {
+			"operations": OPERATIONS_SEQUENCE,
+			"groups": [],
+			"summary": [],
+		}
+
 	detail_rows = _get_detail_rows(filters)
 	sales_orders = sorted({(row.get("sales_order") or "").strip() for row in detail_rows if row.get("sales_order")})
 	order_qty_map = _get_sales_order_item_qty_map(sales_orders, filters.get("item"))
@@ -103,6 +110,21 @@ def get_daily_operation_page_data(filters=None):
 			{"label": "Production Qty", "value": total_qty, "indicator": "Green", "datatype": "Float"},
 		],
 	}
+
+
+def _has_daily_production_tables():
+	return _table_exists("Daily Production") and _table_exists("Operation Process")
+
+
+def _table_exists(doctype):
+	table_name = f"tab{doctype}"
+	return bool(
+		frappe.db.sql(
+			"SHOW TABLES LIKE %(table_name)s",
+			{"table_name": table_name},
+			as_dict=False,
+		)
+	)
 
 
 def _get_detail_rows(filters):
