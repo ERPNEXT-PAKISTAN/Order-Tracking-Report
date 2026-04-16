@@ -535,6 +535,7 @@ frappe.ui.form.on("Delivery Note Item", {
 def create_or_update_delivery_note_print_format():
 	html = """
 <style>
+  @page { size: A4 landscape; margin: 8mm; }
   .dncr-wrap { font-size: 11px; color: #000; font-family: Arial, sans-serif; }
   .dncr-header { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 0; }
   .dncr-header td, .dncr-header th { border: 2px solid #111827; padding: 6px 8px; vertical-align: middle; }
@@ -551,6 +552,9 @@ def create_or_update_delivery_note_print_format():
   .dncr-right { text-align: right; }
   .dncr-item { font-weight: 700; }
   .dncr-total-row td { font-weight: 800; background: #f3f4f6; }
+  @media print {
+    html, body { width: 297mm; }
+  }
 </style>
 
 {% set company_doc = frappe.get_cached_doc("Company", doc.company) if doc.company else None %}
