@@ -112,7 +112,8 @@ def ensure_sales_order_live_shortcuts():
     ensure_manufacturing_workspace_shortcut()
     ensure_manufacturing_live_work_order_shortcut()
     ensure_manufacturing_sales_order_status_board_shortcut()
-    ensure_selling_daily_operation_report_shortcut()
+    remove_workspace_report_shortcut("Selling", "Daily Operation Report", "Daily Operation Report")
+    ensure_selling_daily_operation_report_page_shortcut()
     remove_workspace_page_shortcut("Manufacturing", "Existing Manufacturing Documents", "existing-manufacturing-documents")
     ensure_manufacturing_manage_sales_orders_shortcut()
     ensure_order_tracking_workspace()
@@ -259,6 +260,49 @@ def _ensure_workspace_report_shortcut(workspace_name, label, report_name, color)
     _ensure_workspace_shortcut(workspace_name, label, "Report", report_name, color)
 
 
+def remove_workspace_report_shortcut(workspace_name, label, report_name):
+    if not frappe.db.exists("Workspace", workspace_name):
+        return
+
+    changed = False
+    shortcut_names = frappe.get_all(
+        "Workspace Shortcut",
+        filters={
+            "parent": workspace_name,
+            "parenttype": "Workspace",
+            "parentfield": "shortcuts",
+            "label": label,
+            "type": "Report",
+            "link_to": report_name,
+        },
+        pluck="name",
+    )
+    for shortcut_name in shortcut_names:
+        frappe.delete_doc("Workspace Shortcut", shortcut_name, ignore_permissions=True, force=True)
+        changed = True
+
+    try:
+        content = frappe.parse_json(frappe.db.get_value("Workspace", workspace_name, "content")) or []
+    except Exception:
+        content = []
+
+    filtered_content = [
+        block
+        for block in content
+        if not (
+            block.get("type") == "shortcut"
+            and (block.get("data") or {}).get("shortcut_name") == label
+        )
+    ]
+
+    if len(filtered_content) != len(content):
+        frappe.db.set_value("Workspace", workspace_name, "content", frappe.as_json(filtered_content), update_modified=False)
+        changed = True
+
+    if changed:
+        frappe.clear_document_cache("Workspace", workspace_name)
+
+
 def remove_workspace_page_shortcut(workspace_name, label, page_name):
     if not frappe.db.exists("Workspace", workspace_name):
         return
@@ -322,9 +366,9 @@ def ensure_manufacturing_manage_sales_orders_shortcut():
     )
 
 
-def ensure_selling_daily_operation_report_shortcut():
-    _ensure_workspace_report_shortcut(
-        "Selling", "Daily Operation Report", "Daily Operation Report", "green"
+def ensure_selling_daily_operation_report_page_shortcut():
+    _ensure_workspace_page_shortcut(
+        "Selling", "Daily Operation Report", "daily-operation-report", "green"
     )
 
 
