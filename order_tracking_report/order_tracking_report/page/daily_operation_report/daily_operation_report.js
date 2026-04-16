@@ -57,10 +57,7 @@ frappe.pages["daily-operation-report"].on_page_load = function (wrapper) {
 function getReportUrl(reportName, routeOptions) {
 	const encodedReportName = encodeURIComponent(reportName);
 	const queryString = buildQueryString(routeOptions || {});
-	if ((window.location.pathname || "").startsWith("/desk")) {
-		return `/desk#query-report/${encodedReportName}${queryString}`;
-	}
-	return `/app/query-report/${encodedReportName}${queryString}`;
+	return `${window.location.origin}/app/query-report/${encodedReportName}${queryString}`;
 }
 
 function buildQueryString(routeOptions) {
