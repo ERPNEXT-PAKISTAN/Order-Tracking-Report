@@ -122,7 +122,7 @@ def get_sales_order_items_for_daily_production(sales_order=None):
     rows = frappe.get_all(
         "Sales Order Item",
         filters={"parent": sales_order, "parenttype": "Sales Order"},
-        fields=["name", "item_code", "item_name", "description", "qty", "uom"],
+        fields=["name", "item_code"],
         order_by="idx asc",
     )
 
@@ -130,10 +130,6 @@ def get_sales_order_items_for_daily_production(sales_order=None):
         {
             "sales_order_item": row.get("name") or "",
             "item_code": row.get("item_code") or "",
-            "item_name": row.get("item_name") or "",
-            "description": row.get("description") or "",
-            "qty": frappe.utils.flt(row.get("qty")),
-            "uom": row.get("uom") or "",
         }
         for row in rows
     ]
