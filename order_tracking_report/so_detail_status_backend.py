@@ -1,5 +1,7 @@
 import frappe
 
+from order_tracking_report.order_tracking_report.page.daily_operation_report.daily_operation_report import get_daily_operation_page_data
+
 
 def run(sales_order=None, action=None, doctype=None, docname=None, stock_location=None, item_code=None):
     doc_doctype = doctype
@@ -3000,6 +3002,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             "stock_location": selected_stock_location,
             "production_tree": prod.get("tree") or [],
             "daily_production": prod.get("daily_production") or [],
+            "daily_operation_report": get_daily_operation_page_data({"sales_order": sales_order}),
             "production_fg_summary": fg_production_summary,
             "production_totals": prod.get("totals") or {
                 "total_qty": 0,

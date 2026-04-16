@@ -199,6 +199,7 @@ frappe.ui.form.on("Sales Order", {
         bindToggles($dashboardBody);
         bindPopupLinks($dashboardBody);
         bindSectionToggles($dashboardBody);
+        bindDailyOperationProductionToggles($dashboardBody);
         bindMaterialShortageCreatePo($dashboardBody, frm, data);
         bindDashboardActionButtons($dashboardBody, frm, data);
       },
@@ -2236,6 +2237,88 @@ function bomTree(tree){
 function poTotalAmount(rows){
   rows = rows || [];
   return rows.reduce((a,r)=>a + Number(r.po_amount || 0), 0);
+}
+
+function dailyOperationWiseProductionTable(payload){
+  const operations = (payload && payload.operations) || [];
+  const groups = (payload && payload.groups) || [];
+  if (!groups.length) {
+    return `<div class="text-muted">No daily operation production found.</div>`;
+  }
+
+  const html = [`<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;min-width:${Math.max(900, 360 + operations.length * 150)}px;">`];
+  html.push(`<thead><tr><th style="min-width:260px;"></th><th rowspan="2" style="min-width:140px;text-align:center;">Order Qty</th><th colspan="${operations.length}" style="text-align:center;">Operations</th></tr>`);
+  html.push(`<tr><th>Date</th>${operations.map((operation) => `<th style="text-align:center;">${esc(operation)}</th>`).join("")}</tr></thead><tbody>`);
+
+  groups.forEach((salesOrderGroup, salesOrderIndex) => {
+    const salesOrderKey = `so-${salesOrderIndex}`;
+    const toggleStyle = "border:0;background:transparent;color:inherit;font:inherit;padding:0;cursor:pointer;text-align:left;";
+    html.push(`<tr>`);
+    html.push(`<td style="background:#0f4c1d;color:#fff;font-weight:800;white-space:nowrap;"><button style="${toggleStyle}" data-dop-sales-order-toggle="${salesOrderKey}" data-collapsed="0">[-] ${esc(salesOrderGroup.sales_order || "")}</button></td>`);
+    html.push(`<td style="background:#0f4c1d;color:#fff;font-weight:800;text-align:center;white-space:nowrap;">${_n0(salesOrderGroup.order_qty || 0)}</td>`);
+    html.push(operations.map((operation) => `<td style="background:#0f4c1d;color:#fff;font-weight:800;text-align:center;white-space:nowrap;">${_n0(((salesOrderGroup.totals || {})[operation]) || 0)}</td>`).join(""));
+    html.push(`</tr>`);
+
+    (salesOrderGroup.items || []).forEach((itemGroup, itemIndex) => {
+      const itemKey = `${salesOrderKey}-item-${itemIndex}`;
+      html.push(`<tr data-dop-item-header="${itemKey}" data-dop-parent-sales-order="${salesOrderKey}">`);
+      html.push(`<td style="background:#f8fafc;color:#0f172a;font-weight:700;white-space:nowrap;"><button style="${toggleStyle}" data-dop-item-toggle="${itemKey}" data-collapsed="1">[+] ${esc(itemGroup.item || "")}</button></td>`);
+      html.push(`<td style="background:#f8fafc;color:#0f172a;font-weight:700;text-align:center;white-space:nowrap;">${_n0(itemGroup.order_qty || 0)}</td>`);
+      html.push(operations.map((operation) => `<td style="background:#f8fafc;color:#1d4ed8;font-weight:800;text-align:center;white-space:nowrap;">${_n0((itemGroup.totals || {})[operation] || 0)}</td>`).join(""));
+      html.push(`</tr>`);
+
+      (itemGroup.rows || []).forEach((dateRow) => {
+        html.push(`<tr data-dop-item-detail="${itemKey}" data-dop-parent-sales-order="${salesOrderKey}" style="display:none;">`);
+        html.push(`<td>${esc(dateRow.date || "")}</td><td></td>`);
+        html.push(operations.map((operation) => `<td style="text-align:center;">${_n0(((dateRow.values || {})[operation]) || 0)}</td>`).join(""));
+        html.push(`</tr>`);
+      });
+
+      html.push(`<tr data-dop-item-detail="${itemKey}" data-dop-parent-sales-order="${salesOrderKey}" style="display:none;">`);
+      html.push(`<td style="font-weight:800;color:#b91c1c;">Wastage</td><td></td>`);
+      html.push(operations.map((operation) => `<td style="text-align:center;font-weight:800;color:#b91c1c;">${_n0((itemGroup.wastage || {})[operation] || 0)}</td>`).join(""));
+      html.push(`</tr>`);
+
+      html.push(`<tr data-dop-item-detail="${itemKey}" data-dop-parent-sales-order="${salesOrderKey}" style="display:none;">`);
+      html.push(`<td style="height:16px;background:#fff;"></td><td style="background:#fff;"></td>`);
+      html.push(operations.map(() => `<td style="background:#fff;"></td>`).join(""));
+      html.push(`</tr>`);
+    });
+  });
+
+  html.push(`</tbody></table></div>`);
+  return html.join("");
+}
+
+function bindDailyOperationProductionToggles($wrap){
+  $wrap.find("[data-dop-item-toggle]").off("click").on("click", function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    const key = ($(this).attr("data-dop-item-toggle") || "").trim();
+    if (!key) return;
+    const collapsed = ($(this).attr("data-collapsed") || "1") === "1";
+    $(this).attr("data-collapsed", collapsed ? "0" : "1").text(`${collapsed ? "[-]" : "[+]"} ${$(this).text().replace(/^\[.\]\s*/, "")}`);
+    $wrap.find(`[data-dop-item-detail="${key}"]`).css("display", collapsed ? "table-row" : "none");
+  });
+
+  $wrap.find("[data-dop-sales-order-toggle]").off("click").on("click", function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    const key = ($(this).attr("data-dop-sales-order-toggle") || "").trim();
+    if (!key) return;
+    const collapsed = ($(this).attr("data-collapsed") || "0") === "1";
+    $(this).attr("data-collapsed", collapsed ? "0" : "1").text(`${collapsed ? "[-]" : "[+]"} ${$(this).text().replace(/^\[.\]\s*/, "")}`);
+    $wrap.find(`[data-dop-parent-sales-order="${key}"][data-dop-item-header]`).css("display", collapsed ? "table-row" : "none");
+    if (collapsed) {
+      $wrap.find(`[data-dop-parent-sales-order="${key}"][data-dop-item-detail]`).each(function(){
+        const itemKey = ($(this).attr("data-dop-item-detail") || "").trim();
+        const itemButton = $wrap.find(`[data-dop-item-toggle="${itemKey}"]`);
+        $(this).css("display", itemButton.attr("data-collapsed") === "1" ? "none" : "table-row");
+      });
+      return;
+    }
+    $wrap.find(`[data-dop-parent-sales-order="${key}"][data-dop-item-detail]`).css("display", "none");
+  });
 }
 
 function buildDashboard(frm, data){
@@ -5406,6 +5489,10 @@ function buildDashboard(frm, data){
       ${card("PO Analytics (From PO Tab)", "Item Group-Wise PO Status", `${poAnalyticsOverviewCard((data.custom_po_analytics || {}).overview || {})}${poItemGroupTable((data.custom_po_analytics || {}).item_group_rows || [])}`)}
       ${card("PO-Wise status Report", "Collapsed by Supplier", poStatusDetailTable((data.custom_po_analytics || {}).po_status_rows || []))}
       ${card("Purchase Flow Tracker", "PO + Purchase Receipt + Purchase Invoice in one row with PO cost", purchaseFlowTable(data.purchase_flow_rows || []))}
+    `, false)}
+
+    ${sectionBlock('daily-operation-wise-production', 'Daily Operation wise Production', 'linear-gradient(90deg,#166534,#16a34a)', `
+      ${card("Daily Operation wise Production", "Same grouped daily production matrix by Sales Order and item.", dailyOperationWiseProductionTable(data.daily_operation_report || {}))}
     `, false)}
 
     ${sectionBlock('production', 'Production Section', 'linear-gradient(90deg,#7a3e00,#a16207)', `

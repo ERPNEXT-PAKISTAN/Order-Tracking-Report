@@ -3,7 +3,7 @@ from __future__ import annotations
 import frappe
 
 
-OPERATIONS_SEQUENCE = ["Cutting", "Stitching", "Quilting", "Packing"]
+OPERATIONS_SEQUENCE = ["Cutting", "Stitching", "Packing", "Quilting"]
 
 
 @frappe.whitelist()
@@ -32,6 +32,7 @@ def get_daily_operation_page_data(filters=None):
 			{
 				"sales_order": sales_order,
 				"order_qty": 0.0,
+					"totals": {operation_name: 0.0 for operation_name in OPERATIONS_SEQUENCE},
 				"items_map": {},
 			},
 		)
@@ -55,6 +56,7 @@ def get_daily_operation_page_data(filters=None):
 		)
 		row_bucket["values"][operation] += qty
 		item_group["totals"][operation] += qty
+		sales_order_group["totals"][operation] += qty
 
 	groups = []
 	total_order_qty = 0.0
@@ -86,6 +88,7 @@ def get_daily_operation_page_data(filters=None):
 			{
 				"sales_order": sales_order,
 				"order_qty": sales_order_group_qty,
+				"totals": {operation: frappe.utils.flt(sales_order_group["totals"].get(operation)) for operation in OPERATIONS_SEQUENCE},
 				"items": items,
 			}
 		)
@@ -147,7 +150,7 @@ def _get_detail_rows(filters):
 			COALESCE(NULLIF(op.sales_order, ''), NULLIF(dp.sales_order, '')) ASC,
 			op.item ASC,
 			DATE(COALESCE(op.date, dp.date)) DESC,
-			FIELD(op.operations, 'Cutting', 'Stitching', 'Quilting', 'Packing')
+			FIELD(op.operations, 'Cutting', 'Stitching', 'Packing', 'Quilting')
 		""",
 		values,
 		as_dict=True,
@@ -188,12 +191,11 @@ def _get_sales_order_item_qty_map(sales_orders, item_code=None):
 def _build_wastage_row(order_qty, totals):
 	cutting = frappe.utils.flt(totals.get("Cutting"))
 	stitching = frappe.utils.flt(totals.get("Stitching"))
-	quilting = frappe.utils.flt(totals.get("Quilting"))
 	packing = frappe.utils.flt(totals.get("Packing"))
 
 	return {
 		"Cutting": max(order_qty - cutting, 0),
 		"Stitching": max(cutting - stitching, 0),
-		"Quilting": max(stitching - quilting, 0),
-		"Packing": max(quilting - packing, 0),
+		"Packing": max(stitching - packing, 0),
+		"Quilting": 0.0,
 	}

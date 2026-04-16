@@ -111,20 +111,37 @@ def _aggregate_qty_by_item(rows):
 
 
 @frappe.whitelist()
-def get_sales_order_items_for_daily_production(sales_order=None):
+def get_sales_order_items_for_daily_production(sales_order=None, item_group=None):
     sales_order = (sales_order or "").strip()
+    item_group = (item_group or "").strip()
     if not sales_order:
         frappe.throw("Sales Order is required")
 
     if not frappe.db.exists("Sales Order", sales_order):
         frappe.throw("Sales Order not found")
 
-    rows = frappe.get_all(
-        "Sales Order Item",
-        filters={"parent": sales_order, "parenttype": "Sales Order"},
-        fields=["name", "item_code"],
-        order_by="idx asc",
-    )
+    if item_group:
+        rows = frappe.db.sql(
+            """
+            SELECT soi.name, soi.item_code
+            FROM `tabSales Order Item` soi
+            INNER JOIN `tabItem` item ON item.name = soi.item_code
+            WHERE
+                soi.parent = %(sales_order)s
+                AND soi.parenttype = 'Sales Order'
+                AND item.item_group = %(item_group)s
+            ORDER BY soi.idx ASC
+            """,
+            {"sales_order": sales_order, "item_group": item_group},
+            as_dict=True,
+        )
+    else:
+        rows = frappe.get_all(
+            "Sales Order Item",
+            filters={"parent": sales_order, "parenttype": "Sales Order"},
+            fields=["name", "item_code"],
+            order_by="idx asc",
+        )
 
     return [
         {

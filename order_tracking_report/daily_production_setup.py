@@ -3,11 +3,43 @@ from __future__ import annotations
 import json
 
 import frappe
+from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 
 PARENT_DOCTYPE = "Daily Production"
 CHILD_DOCTYPE = "Operation Process"
 SCRIPT_NAME = "Daily Production Sales Order Loader"
+
+PARENT_CUSTOM_FIELDS = {
+    PARENT_DOCTYPE: [
+        {
+            "fieldname": "otr_column_break_item_group",
+            "label": "",
+            "fieldtype": "Column Break",
+            "insert_after": "customer",
+        },
+        {
+            "fieldname": "item_group",
+            "label": "Item Group",
+            "fieldtype": "Link",
+            "options": "Item Group",
+            "insert_after": "otr_column_break_item_group",
+        },
+        {
+            "fieldname": "otr_column_break_company",
+            "label": "",
+            "fieldtype": "Column Break",
+            "insert_after": "item_group",
+        },
+        {
+            "fieldname": "company",
+            "label": "Company",
+            "fieldtype": "Link",
+            "options": "Company",
+            "insert_after": "otr_column_break_company",
+        },
+    ]
+}
 
 LEGACY_CUSTOM_FIELDS = {
     PARENT_DOCTYPE: ["operation_process", "column_break_company"],
@@ -27,8 +59,16 @@ LEGACY_CUSTOM_FIELDS = {
 
 def ensure_daily_production_setup() -> None:
     remove_legacy_daily_production_custom_fields()
+    ensure_daily_production_custom_fields()
     ensure_daily_production_field_order()
     ensure_daily_production_client_script()
+
+
+def ensure_daily_production_custom_fields() -> None:
+    if not frappe.db.exists("DocType", PARENT_DOCTYPE):
+        return
+
+    create_custom_fields(PARENT_CUSTOM_FIELDS, update=True)
 
 
 def remove_legacy_daily_production_custom_fields() -> None:
@@ -60,26 +100,38 @@ def ensure_daily_production_field_order() -> None:
     table_fieldname = _get_child_table_fieldname(meta)
     remarks_field = _find_field(meta, "remarks")
     table_field = _find_field(meta, table_fieldname) if table_fieldname else None
+    section_break_items = _find_field(meta, "section_break_items")
+
+    if section_break_items and frappe.db.exists("Custom Field", section_break_items.name):
+        frappe.db.set_value(
+            "Custom Field",
+            section_break_items.name,
+            "insert_after",
+            "company",
+            update_modified=False,
+        )
 
     if not table_fieldname or not remarks_field or not table_field:
+        frappe.clear_document_cache("DocType", PARENT_DOCTYPE)
+        frappe.db.commit()
         return
 
     if frappe.utils.cint(remarks_field.idx) > frappe.utils.cint(table_field.idx):
         return
 
     if frappe.db.exists("Custom Field", remarks_field.name):
-      frappe.db.set_value(
-        "Custom Field",
-        remarks_field.name,
-        "insert_after",
-        table_fieldname,
-        update_modified=False,
-      )
+        frappe.db.set_value(
+            "Custom Field",
+            remarks_field.name,
+            "insert_after",
+            table_fieldname,
+            update_modified=False,
+        )
     elif frappe.db.exists("DocField", remarks_field.name):
-      max_idx = 0
-      for field in getattr(meta, "fields", []) or []:
-        max_idx = max(max_idx, frappe.utils.cint(field.idx))
-      frappe.db.set_value("DocField", remarks_field.name, "idx", max_idx + 1, update_modified=False)
+        max_idx = 0
+        for field in getattr(meta, "fields", []) or []:
+            max_idx = max(max_idx, frappe.utils.cint(field.idx))
+        frappe.db.set_value("DocField", remarks_field.name, "idx", max_idx + 1, update_modified=False)
 
     frappe.clear_document_cache("DocType", PARENT_DOCTYPE)
     frappe.db.commit()
@@ -99,6 +151,9 @@ def _get_loader_config() -> dict | None:
     item_fieldname = _get_item_fieldname(child_meta)
     date_fieldname = "date" if _find_field(child_meta, "date") else None
     sales_order_fieldname = "sales_order" if _find_field(child_meta, "sales_order") else None
+    item_group_fieldname = "item_group" if _find_field(parent_meta, "item_group") else None
+    customer_fieldname = "customer" if _find_field(parent_meta, "customer") else None
+    company_fieldname = "company" if _find_field(parent_meta, "company") else None
 
     if not table_fieldname or not item_fieldname:
         return None
@@ -108,6 +163,9 @@ def _get_loader_config() -> dict | None:
         "item_fieldname": item_fieldname,
         "date_fieldname": date_fieldname,
         "sales_order_fieldname": sales_order_fieldname,
+        "item_group_fieldname": item_group_fieldname,
+        "customer_fieldname": customer_fieldname,
+        "company_fieldname": company_fieldname,
     }
 
 
@@ -163,9 +221,75 @@ const OTR_TABLE_FIELD = {json.dumps(config['table_fieldname'])};
 const OTR_ITEM_FIELD = {json.dumps(config['item_fieldname'])};
 const OTR_DATE_FIELD = {json.dumps(config['date_fieldname'])};
 const OTR_SALES_ORDER_FIELD = {json.dumps(config['sales_order_fieldname'])};
+const OTR_ITEM_GROUP_FIELD = {json.dumps(config['item_group_fieldname'])};
+const OTR_CUSTOMER_FIELD = {json.dumps(config['customer_fieldname'])};
+const OTR_COMPANY_FIELD = {json.dumps(config['company_fieldname'])};
 
 function otrHasValue(value) {{
   return value !== undefined && value !== null && String(value).trim() !== '';
+}}
+
+function otrSetIfPresent(frm, fieldname, value) {{
+  if (!fieldname || !frm.fields_dict[fieldname]) {{
+    return Promise.resolve();
+  }}
+  return frm.set_value(fieldname, value || '');
+}}
+
+function otrApplyParentValuesToRow(frm, row) {{
+  if (!row) {{
+    return;
+  }}
+
+  if (OTR_DATE_FIELD) {{
+    row[OTR_DATE_FIELD] = frm.doc.date || '';
+  }}
+  if (OTR_SALES_ORDER_FIELD) {{
+    row[OTR_SALES_ORDER_FIELD] = frm.doc.sales_order || '';
+  }}
+}}
+
+function otrApplyParentSalesOrder(frm) {{
+  if (!OTR_SALES_ORDER_FIELD) {{
+    return;
+  }}
+
+  (frm.doc[OTR_TABLE_FIELD] || []).forEach((row) => {{
+    row[OTR_SALES_ORDER_FIELD] = frm.doc.sales_order || '';
+  }});
+  frm.refresh_field(OTR_TABLE_FIELD);
+}}
+
+function otrRefreshItemQuery(frm) {{
+  const getItemQuery = () => {{
+    const filters = {{ disabled: 0 }};
+    if (OTR_ITEM_GROUP_FIELD && frm.doc[OTR_ITEM_GROUP_FIELD]) {{
+      filters.item_group = frm.doc[OTR_ITEM_GROUP_FIELD];
+    }}
+    return {{ filters }};
+  }};
+
+  frm.set_query(OTR_ITEM_FIELD, OTR_TABLE_FIELD, getItemQuery);
+  if (
+    frm.fields_dict &&
+    frm.fields_dict[OTR_TABLE_FIELD] &&
+    frm.fields_dict[OTR_TABLE_FIELD].grid
+  ) {{
+    frm.fields_dict[OTR_TABLE_FIELD].grid.get_field(OTR_ITEM_FIELD).get_query = getItemQuery;
+  }}
+}}
+
+async function otrApplySalesOrderContext(frm) {{
+  if (!frm.doc.sales_order) {{
+    await otrSetIfPresent(frm, OTR_CUSTOMER_FIELD, '');
+    await otrSetIfPresent(frm, OTR_COMPANY_FIELD, '');
+    return;
+  }}
+
+  const response = await frappe.db.get_value('Sales Order', frm.doc.sales_order, ['customer_name', 'customer', 'company']);
+  const details = response.message || {{}};
+  await otrSetIfPresent(frm, OTR_CUSTOMER_FIELD, details.customer_name || details.customer || '');
+  await otrSetIfPresent(frm, OTR_COMPANY_FIELD, details.company || '');
 }}
 
 function otrGetExistingRows(frm) {{
@@ -208,7 +332,10 @@ async function otrLoadSalesOrderItems(frm, forceReload) {{
 
   const response = await frappe.call({{
     method: 'order_tracking_report.api.get_sales_order_items_for_daily_production',
-    args: {{ sales_order: frm.doc.sales_order }},
+    args: {{
+      sales_order: frm.doc.sales_order,
+      item_group: OTR_ITEM_GROUP_FIELD ? (frm.doc[OTR_ITEM_GROUP_FIELD] || '') : '',
+    }},
     freeze: true,
     freeze_message: __('Loading Sales Order items...'),
   }});
@@ -219,34 +346,47 @@ async function otrLoadSalesOrderItems(frm, forceReload) {{
   rows.forEach((row) => {{
     const child = frm.add_child(OTR_TABLE_FIELD);
     child[OTR_ITEM_FIELD] = row.item_code || '';
-    if (OTR_DATE_FIELD) {{
-      child[OTR_DATE_FIELD] = frm.doc.date || '';
-    }}
-    if (OTR_SALES_ORDER_FIELD) {{
-      child[OTR_SALES_ORDER_FIELD] = frm.doc.sales_order || '';
-    }}
+    otrApplyParentValuesToRow(frm, child);
   }});
 
   frm.refresh_field(OTR_TABLE_FIELD);
 }}
 
-frappe.ui.form.on('Daily Production', {{
-  refresh(frm) {{
+const dailyProductionHandlers = {{
+  async refresh(frm) {{
+    otrRefreshItemQuery(frm);
+    await otrApplySalesOrderContext(frm);
+    otrApplyParentSalesOrder(frm);
+    otrApplyParentDate(frm);
     frm.add_custom_button(__('Load Items from Sales Order'), () => otrLoadSalesOrderItems(frm, false));
   }},
-  sales_order(frm) {{
+  async sales_order(frm) {{
+    await otrApplySalesOrderContext(frm);
+    otrApplyParentSalesOrder(frm);
     if (!frm.doc.sales_order) {{
       frm.clear_table(OTR_TABLE_FIELD);
       frm.refresh_field(OTR_TABLE_FIELD);
       return;
     }}
 
-    otrLoadSalesOrderItems(frm, true);
+    await otrLoadSalesOrderItems(frm, true);
   }},
   date(frm) {{
     otrApplyParentDate(frm);
   }},
-}});
+  item_group(frm) {{
+    otrRefreshItemQuery(frm);
+    frm.refresh_field(OTR_TABLE_FIELD);
+  }},
+}};
+
+dailyProductionHandlers[`${{OTR_TABLE_FIELD}}_add`] = function (frm, cdt, cdn) {{
+  const row = locals[cdt] && locals[cdt][cdn];
+  otrApplyParentValuesToRow(frm, row);
+  frm.refresh_field(OTR_TABLE_FIELD);
+}};
+
+frappe.ui.form.on('Daily Production', dailyProductionHandlers);
 """
 
     if frappe.db.exists("Client Script", SCRIPT_NAME):
