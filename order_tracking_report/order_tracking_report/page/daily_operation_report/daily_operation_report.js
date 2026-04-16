@@ -157,8 +157,8 @@ window.order_tracking_report.DailyOperationReportPage = class DailyOperationRepo
 				fieldname: "group_by",
 				label: __("Group By"),
 				fieldtype: "Select",
-				options: ["None", "Date", "Sales Order", "Item", "Operation", "Employee"],
-				default: "Date",
+				options: ["None", "Date", "Sales Order Number", "Item", "Operation", "Employee"],
+				default: "Sales Order Number",
 				reqd: 1,
 			},
 			{
@@ -286,7 +286,7 @@ window.order_tracking_report.DailyOperationReportPage = class DailyOperationRepo
 				const rawValue = row[column.fieldname];
 				const content = this.renderCell(row, column, rawValue);
 				const style = [];
-				if (column.fieldname === "group_or_date" && row.indent) {
+				if (column.fieldname === "group_value" && row.indent) {
 					style.push(`padding-left:${16 + row.indent * 18}px`);
 				}
 				if (row.bold) {
@@ -311,12 +311,12 @@ window.order_tracking_report.DailyOperationReportPage = class DailyOperationRepo
 			return `<a href="#" data-link-doctype="${frappe.utils.escape_html(column.options || "")}" data-link-name="${frappe.utils.escape_html(String(value))}">${frappe.utils.escape_html(String(value))}</a>`;
 		}
 
-		if (column.fieldtype === "Float") {
-			return this.formatValue(value, "Float");
+		if (column.fieldtype === "Date") {
+			return frappe.format(value, { fieldtype: "Date" }, { always_show_decimals: false });
 		}
 
-		if (column.fieldname === "group_or_date" && value && !row.bold) {
-			return frappe.format(value, { fieldtype: "Date" }, { always_show_decimals: false });
+		if (column.fieldtype === "Float") {
+			return this.formatValue(value, "Float");
 		}
 
 		return frappe.utils.escape_html(String(value));
