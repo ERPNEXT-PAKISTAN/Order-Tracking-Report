@@ -12,7 +12,6 @@ SCRIPT_NAME = "Daily Production Sales Order Loader"
 LEGACY_CUSTOM_FIELDS = {
     PARENT_DOCTYPE: ["operation_process", "column_break_company"],
     CHILD_DOCTYPE: [
-        "sales_order",
         "sales_order_item",
         "description",
         "uom",
@@ -28,6 +27,7 @@ LEGACY_CUSTOM_FIELDS = {
 
 def ensure_daily_production_setup() -> None:
     remove_legacy_daily_production_custom_fields()
+    ensure_daily_production_field_order()
     ensure_daily_production_client_script()
 
 
@@ -52,6 +52,39 @@ def remove_legacy_daily_production_custom_fields() -> None:
             frappe.clear_document_cache("DocType", doctype_name)
 
 
+def ensure_daily_production_field_order() -> None:
+    if not frappe.db.exists("DocType", PARENT_DOCTYPE):
+        return
+
+    meta = frappe.get_meta(PARENT_DOCTYPE)
+    table_fieldname = _get_child_table_fieldname(meta)
+    remarks_field = _find_field(meta, "remarks")
+    table_field = _find_field(meta, table_fieldname) if table_fieldname else None
+
+    if not table_fieldname or not remarks_field or not table_field:
+        return
+
+    if frappe.utils.cint(remarks_field.idx) > frappe.utils.cint(table_field.idx):
+        return
+
+    if frappe.db.exists("Custom Field", remarks_field.name):
+      frappe.db.set_value(
+        "Custom Field",
+        remarks_field.name,
+        "insert_after",
+        table_fieldname,
+        update_modified=False,
+      )
+    elif frappe.db.exists("DocField", remarks_field.name):
+      max_idx = 0
+      for field in getattr(meta, "fields", []) or []:
+        max_idx = max(max_idx, frappe.utils.cint(field.idx))
+      frappe.db.set_value("DocField", remarks_field.name, "idx", max_idx + 1, update_modified=False)
+
+    frappe.clear_document_cache("DocType", PARENT_DOCTYPE)
+    frappe.db.commit()
+
+
 def _get_loader_config() -> dict | None:
     if not frappe.db.exists("DocType", PARENT_DOCTYPE):
         return None
@@ -64,7 +97,8 @@ def _get_loader_config() -> dict | None:
 
     table_fieldname = _get_child_table_fieldname(parent_meta)
     item_fieldname = _get_item_fieldname(child_meta)
-    date_fieldname = "date" if child_meta.get_field("date") else None
+    date_fieldname = "date" if _find_field(child_meta, "date") else None
+    sales_order_fieldname = "sales_order" if _find_field(child_meta, "sales_order") else None
 
     if not table_fieldname or not item_fieldname:
         return None
@@ -73,16 +107,17 @@ def _get_loader_config() -> dict | None:
         "table_fieldname": table_fieldname,
         "item_fieldname": item_fieldname,
         "date_fieldname": date_fieldname,
+        "sales_order_fieldname": sales_order_fieldname,
     }
 
 
 def _get_child_table_fieldname(parent_meta) -> str | None:
     for fieldname in ["operations", "operation_process"]:
-        field = parent_meta.get_field(fieldname)
+        field = _find_field(parent_meta, fieldname)
         if field and field.fieldtype == "Table" and field.options == CHILD_DOCTYPE:
             return fieldname
 
-    for field in parent_meta.fields:
+    for field in getattr(parent_meta, "fields", []) or []:
         if field.fieldtype == "Table" and field.options == CHILD_DOCTYPE:
             return field.fieldname
 
@@ -91,9 +126,24 @@ def _get_child_table_fieldname(parent_meta) -> str | None:
 
 def _get_item_fieldname(child_meta) -> str | None:
     for fieldname in ["item", "item_code"]:
-        field = child_meta.get_field(fieldname)
+        field = _find_field(child_meta, fieldname)
         if field and field.fieldtype == "Link" and field.options == "Item":
             return fieldname
+
+    return None
+
+
+def _find_field(meta_or_doc, fieldname: str | None):
+    if not fieldname:
+        return None
+
+    get_field = getattr(meta_or_doc, "get_field", None)
+    if callable(get_field):
+        return get_field(fieldname)
+
+    for field in getattr(meta_or_doc, "fields", []) or []:
+        if field.fieldname == fieldname:
+            return field
 
     return None
 
@@ -112,6 +162,7 @@ def ensure_daily_production_client_script() -> None:
 const OTR_TABLE_FIELD = {json.dumps(config['table_fieldname'])};
 const OTR_ITEM_FIELD = {json.dumps(config['item_fieldname'])};
 const OTR_DATE_FIELD = {json.dumps(config['date_fieldname'])};
+const OTR_SALES_ORDER_FIELD = {json.dumps(config['sales_order_fieldname'])};
 
 function otrHasValue(value) {{
   return value !== undefined && value !== null && String(value).trim() !== '';
@@ -170,6 +221,9 @@ async function otrLoadSalesOrderItems(frm, forceReload) {{
     child[OTR_ITEM_FIELD] = row.item_code || '';
     if (OTR_DATE_FIELD) {{
       child[OTR_DATE_FIELD] = frm.doc.date || '';
+    }}
+    if (OTR_SALES_ORDER_FIELD) {{
+      child[OTR_SALES_ORDER_FIELD] = frm.doc.sales_order || '';
     }}
   }});
 
