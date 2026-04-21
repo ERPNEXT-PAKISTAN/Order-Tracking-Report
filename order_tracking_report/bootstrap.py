@@ -15,6 +15,37 @@ def ensure_item_po_setup():
     ensure_purchase_order_item_tracking_fields()
     ensure_allow_on_submit_for_po_fields()
     ensure_sales_order_po_tab_field_order()
+    ensure_sales_order_item_custom_fields()
+
+
+# Ensure custom fields on Sales Order Item for fabric quality, design color, comments
+def ensure_sales_order_item_custom_fields():
+    custom_fields = {
+        "Sales Order Item": [
+            {
+                "fieldname": "custom_fabric_quality",
+                "label": "Fabric Quality",
+                "fieldtype": "Data",
+                "insert_after": "item_name",
+                "allow_on_submit": 1,
+            },
+            {
+                "fieldname": "custom_designcolor",
+                "label": "Design/Color",
+                "fieldtype": "Data",
+                "insert_after": "custom_fabric_quality",
+                "allow_on_submit": 1,
+            },
+            {
+                "fieldname": "custom_comments",
+                "label": "Comments",
+                "fieldtype": "Data",
+                "insert_after": "custom_designcolor",
+                "allow_on_submit": 1,
+            },
+        ]
+    }
+    create_custom_fields(custom_fields, update=True)
 
 
 def ensure_sales_order_po_tab_fields():
