@@ -20,38 +20,73 @@ order_tracking_report.LiveWorkOrderPage = class LiveWorkOrderPage {
 		setTimeout(() => this.load(), 0);
 	}
 
-	async load() {
-		this.$root = $(this.wrapper).find(".layout-main-section");
-		this.$root.html(`<div class="text-muted">${__("Loading Live Work Order...")}</div>`);
+	       async load() {
+		       this.$root = $(this.wrapper).find(".layout-main-section");
+		       this.$root.html(`<div class="text-muted">${__("Loading Live Work Order...")}</div>`);
 
-		try {
-			const response = await frappe.call({
-				method: "order_tracking_report.api.get_custom_html_block_page_payload",
-				args: { block_name: "Live Work Order" },
-			});
-			const payload = response.message || {};
-			this.render(payload);
-		} catch (error) {
-			this.$root.html(`<div class="text-danger">${__("Live Work Order page is not available.")}</div>`);
-			frappe.show_alert({ message: __("Failed to load Live Work Order page."), indicator: "red" }, 6);
-		}
-	}
+		       let summaryHtml = '';
+		       try {
+			       // Fetch daily operation summary
+			       const summaryResp = await frappe.call({
+				       method: "order_tracking_report.order_tracking_report.page.daily_operation_report.daily_operation_report.get_daily_operation_page_data",
+				       args: { filters: JSON.stringify({}) },
+			       });
+			       const summaryData = summaryResp.message || {};
+			       summaryHtml = this.renderItemSummarySection(summaryData);
+		       } catch (e) {
+			       summaryHtml = `<div class="text-danger">${__("Could not load production summary.")}</div>`;
+		       }
 
-	render(payload) {
-		const html = payload.html || `<div class="text-muted">${__("No page content found.")}</div>`;
-		this.$root.html(`<div class="otr-live-work-order-page">${html}</div>`);
-		this.applyLayoutOverrides();
+		       try {
+			       const response = await frappe.call({
+				       method: "order_tracking_report.api.get_custom_html_block_page_payload",
+				       args: { block_name: "Live Work Order" },
+			       });
+			       const payload = response.message || {};
+			       this.render(payload, summaryHtml);
+		       } catch (error) {
+			       this.$root.html(`<div class="text-danger">${__("Live Work Order page is not available.")}</div>`);
+			       frappe.show_alert({ message: __("Failed to load Live Work Order page."), indicator: "red" }, 6);
+		       }
+	       }
 
-		const script = document.createElement("script");
-		script.type = "text/javascript";
-		script.text = [
-			"var root_element = document.getElementById('live_production_root') || document;",
-			payload.script || "",
-		].join("\n");
-		this.$root[0].appendChild(script);
+	       render(payload, summaryHtml) {
+		       const html = payload.html || `<div class="text-muted">${__("No page content found.")}</div>`;
+		       this.$root.html(`<div class="otr-live-work-order-page">
+			       <div id="otr-daily-operation-summary-section">${summaryHtml || ""}</div>
+			       ${html}
+		       </div>`);
+		       this.applyLayoutOverrides();
 
-		this.applyRouteFilters();
-	}
+		       const script = document.createElement("script");
+		       script.type = "text/javascript";
+		       script.text = [
+			       "var root_element = document.getElementById('live_production_root') || document;",
+			       payload.script || "",
+		       ].join("\n");
+		       this.$root[0].appendChild(script);
+
+		       this.applyRouteFilters();
+	       }
+
+	       renderItemSummarySection(summaryData) {
+		       if (!summaryData || !Array.isArray(summaryData.groups) || !summaryData.groups.length) {
+			       return `<div class="text-muted">${__("No production summary available.")}</div>`;
+		       }
+		       let html = `<div class="card" style="margin-bottom:18px;padding:16px 18px;background:#f8fafc;border-radius:14px;">
+			       <div style="font-size:16px;font-weight:900;color:#0f172a;margin-bottom:8px;">${__("Daily Operation Item Summary")}</div>`;
+		       html += `<div style="display:flex;gap:24px;flex-wrap:wrap;">`;
+		       summaryData.groups.forEach(group => {
+			       html += `<div style="min-width:220px;">
+				       <div style="font-weight:700;color:#2563eb;">${frappe.utils.escape_html(group.sales_order)}</div>`;
+			       (group.items || []).forEach(item => {
+				       html += `<div style="margin-left:10px;font-size:13px;">• <b>${frappe.utils.escape_html(item.item)}</b> (${__("Order Qty")}: ${item.order_qty || 0})</div>`;
+			       });
+			       html += `</div>`;
+		       });
+		       html += `</div></div>`;
+		       return html;
+	       }
 
 	applyLayoutOverrides() {
 		if (document.getElementById("otr-live-work-order-page-layout")) {

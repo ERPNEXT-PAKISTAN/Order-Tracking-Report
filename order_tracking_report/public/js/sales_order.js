@@ -173,14 +173,20 @@ frappe.ui.form.on("Sales Order", {
     });
     locationControl.set_value(currentLocation || "");
 
+    // Only filter when Apply Location is clicked
     f.$wrapper.find('[data-action="apply-stock-location"]').off("click").on("click", () => {
-      frm.__connection_stock_location = (locationControl.get_value() || "").trim();
-      frm.trigger("render_execution_dashboard");
+      const selectedLocation = (locationControl.get_value() || "").trim();
+      if (selectedLocation && selectedLocation !== frm.__connection_stock_location) {
+        frm.__connection_stock_location = selectedLocation;
+        frm.trigger("render_execution_dashboard");
+      }
     });
 
     f.$wrapper.find('[data-action="clear-stock-location"]').off("click").on("click", () => {
-      frm.__connection_stock_location = "Stores - AH";
-      frm.trigger("render_execution_dashboard");
+      if (frm.__connection_stock_location !== "Stores - AH") {
+        frm.__connection_stock_location = "Stores - AH";
+        frm.trigger("render_execution_dashboard");
+      }
     });
 
     const $dashboardBody = f.$wrapper.find('[data-dashboard-body]');
@@ -1030,7 +1036,7 @@ function deliveryHierarchy(rows){
 }
 
 function orderItemSummaryTable(rows){
-  rows = rows || [];
+  rows = (rows || []).filter(r => String(r.status || r.docstatus || "").toLowerCase() !== "cancelled" && String(r.docstatus) !== "2");
   const body = rows.length ? rows.map(r => `
     <tr>
       <td>${esc(r.item_code || "")}</td>
@@ -1161,32 +1167,32 @@ function deliveryPredictionCard(p){
 }
 
 function profitSummaryCard(s){
-  s = s || {};
-  return `
-    <div class="so-grid-3">
-      <div class="so-mini-card">
-        <div class="so-mini-title">SALES</div>
-        <div class="so-mini-val">${fmtCurrency(s.sales_amount || 0)}</div>
-      </div>
-      <div class="so-mini-card">
-        <div class="so-mini-title">ESTIMATED COST</div>
-        <div class="so-mini-val">${fmtCurrency(s.estimated_cost || 0)}</div>
-      </div>
-      <div class="so-mini-card">
-        <div class="so-mini-title">ESTIMATED PROFIT</div>
-        <div class="so-mini-val">${fmtCurrency(s.estimated_profit || 0)}</div>
-      </div>
-    </div>
-    <div style="margin-top:10px;font-weight:900;">Margin: ${esc(s.margin_pct || 0)}%</div>
-  `;
-}
+  rows = (rows || []).filter(d => String(d.status || d.docstatus || "").toLowerCase() !== "cancelled" && String(d.docstatus) !== "2");
+  if(!rows.length) return `<div class="text-muted">No delivery or billing records.</div>`;
 
-function profitByItemTable(rows){
-  rows = rows || [];
-  const body = rows.length ? rows.map(r => `
-    <tr>
-      <td>${esc(r.item_code||"")}</td>
-      <td style="text-align:right;">${soFlt(r.qty)}</td>
+  const body = rows.map(d=>{
+    const dnCell = d.delivery_note
+      ? `${docPopupLink("Delivery Note", d.delivery_note)}<div class="muted">${badge(d.status)} • ${esc(fmtDT(d.posting_date))}</div>`
+      : `<span class="muted">Invoices without Delivery Note</span>`;
+
+    const invs = (d.invoices || []).filter(i => String(i.status || i.docstatus || "").toLowerCase() !== "cancelled" && String(i.docstatus) !== "2").length
+      ? (d.invoices || []).filter(i => String(i.status || i.docstatus || "").toLowerCase() !== "cancelled" && String(i.docstatus) !== "2").map(i => `
+          <div style="margin-bottom:6px;">
+            ${docPopupLink("Sales Invoice", i.name)}
+            <span class="muted"> ${badge(i.status)} • ${esc(fmtDT(i.posting_date))}</span>
+          </div>
+        `).join("")
+      : `<span class="text-muted">No invoices</span>`;
+
+    return `<tr><td>${dnCell}</td><td>${invs}</td></tr>`;
+  }).join("");
+
+  return `<div class="table-responsive">
+    <table class="table table-bordered so-table" style="margin:0;">
+      <thead><tr><th style="width:280px;">Delivery Note</th><th>Invoices</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+  </div>`;
       <td>${esc(r.default_bom || "—")}</td>
       <td style="text-align:right;">${fmtCurrency(r.bom_unit_cost)}</td>
       <td style="text-align:right;">${fmtCurrency(r.sales_amount)}</td>
@@ -2549,11 +2555,28 @@ function open_po_item_data_entry(frm, prefill) {
     ],
   });
 
+  // Set default warehouse logic
+  const getDefaultWarehouse = () => {
+    // Company-specific logic: e.g., "Stores - {Company Abbr}" or fallback
+    if (frm.doc.company) {
+      // Try to use company abbreviation if available
+      const abbr = (frm.doc.company.match(/\b([A-Z])[A-Z]+/g) || []).join("") || frm.doc.company.split(" ").map(w => w[0]).join("");
+      return `Stores - ${abbr}`;
+    }
+    return DEFAULT_MATERIAL_SHORTAGE_GROUP_WAREHOUSE;
+  };
+
   dialog.fields_dict.warehouse.get_query = () => ({
     filters: {
       company: frm.doc.company || undefined,
       disabled: 0,
     },
+  });
+  // Set default value on dialog open
+  dialog.on('show', () => {
+    if (!dialog.get_value('warehouse')) {
+      dialog.set_value('warehouse', getDefaultWarehouse());
+    }
   });
 
   dialog.fields_dict.item_group.get_query = () => {
@@ -2674,10 +2697,12 @@ function open_po_item_data_entry(frm, prefill) {
       const wastageQty = toNum(typeof row.custom_wastage_qty !== "undefined" ? row.custom_wastage_qty : previous.custom_wastage_qty);
       const extraQty = toNum(typeof row.extra_qty !== "undefined" ? row.extra_qty : previous.extra_qty);
       const poQty = toNum(typeof row.po_qty !== "undefined" ? row.po_qty : (typeof previous.po_qty !== "undefined" ? previous.po_qty : row.qty));
+      let warehouse = row.warehouse || dialog.get_value("warehouse") || "";
+      if (!warehouse) warehouse = getDefaultWarehouse();
       return {
         ...row,
         supplier: row.supplier || dialog.get_value("supplier") || "",
-        warehouse: row.warehouse || dialog.get_value("warehouse") || "",
+        warehouse,
         rate: toNum(row.rate),
         base_qty: baseQty,
         qty: poQty,

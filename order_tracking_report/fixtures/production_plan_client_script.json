@@ -1,0 +1,15 @@
+[
+  {
+    "doctype": "Client Script",
+    "dt": "Production Plan",
+    "script_type": "Client",
+    "enabled": 1,
+    "script": "frappe.ui.form.on('Production Plan', {
+      onload: function(frm) {
+        if (frm.is_new() && frm.doc.create_work_orders_after_submit !== 1) {
+          frm.set_value('create_work_orders_after_submit', 1);
+        }
+      }
+    });"
+  }
+]
