@@ -145,6 +145,7 @@ def ensure_sales_order_live_shortcuts():
     ensure_manufacturing_sales_order_status_board_shortcut()
     remove_workspace_report_shortcut("Selling", "Daily Operation Report", "Daily Operation Report")
     ensure_selling_daily_operation_report_page_shortcut()
+    ensure_selling_daily_production_shortcut()
     remove_workspace_page_shortcut("Manufacturing", "Existing Manufacturing Documents", "existing-manufacturing-documents")
     ensure_manufacturing_manage_sales_orders_shortcut()
     ensure_order_tracking_workspace()
@@ -400,6 +401,12 @@ def ensure_manufacturing_manage_sales_orders_shortcut():
 def ensure_selling_daily_operation_report_page_shortcut():
     _ensure_workspace_page_shortcut(
         "Selling", "Daily Operation Report", "daily-operation-report", "green"
+    )
+
+
+def ensure_selling_daily_production_shortcut():
+    _ensure_workspace_shortcut(
+        "Selling", "Daily Production", "DocType", "Daily Production", "green"
     )
 
 

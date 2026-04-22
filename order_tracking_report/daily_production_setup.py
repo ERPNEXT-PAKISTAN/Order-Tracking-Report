@@ -61,6 +61,7 @@ LEGACY_CUSTOM_FIELDS = {
 
 def ensure_daily_production_setup() -> None:
     ensure_daily_production_doctypes()
+    ensure_operation_process_grid_fields()
     remove_legacy_daily_production_custom_fields()
     ensure_daily_production_custom_fields()
     ensure_daily_production_field_order()
@@ -165,6 +166,53 @@ def ensure_daily_production_custom_fields() -> None:
     missing_fields = [field for field in PARENT_CUSTOM_FIELDS[PARENT_DOCTYPE] if not meta.get_field(field["fieldname"])]
     if missing_fields:
         create_custom_fields({PARENT_DOCTYPE: missing_fields}, update=True)
+
+
+def ensure_operation_process_grid_fields() -> None:
+    if not frappe.db.exists("DocType", CHILD_DOCTYPE):
+        return
+
+    # Keep Operation Process child table readable in grid/list view on every site.
+    field_columns = {
+        "date": 1,
+        "item": 2,
+        "operations": 2,
+        "qty": 1,
+        "employee": 2,
+        "sales_order": 2,
+    }
+    changed = False
+    for fieldname, columns in field_columns.items():
+        docfield_name = frappe.db.get_value(
+            "DocField",
+            {"parent": CHILD_DOCTYPE, "fieldname": fieldname},
+            "name",
+        )
+        if not docfield_name:
+            continue
+
+        current = frappe.db.get_value(
+            "DocField",
+            docfield_name,
+            ["in_list_view", "columns"],
+            as_dict=True,
+        ) or {}
+        in_list_view = frappe.utils.cint(current.get("in_list_view"))
+        current_columns = frappe.utils.cint(current.get("columns"))
+        if in_list_view == 1 and current_columns == columns:
+            continue
+
+        frappe.db.set_value(
+            "DocField",
+            docfield_name,
+            {"in_list_view": 1, "columns": columns},
+            update_modified=False,
+        )
+        changed = True
+
+    if changed:
+        frappe.clear_document_cache("DocType", CHILD_DOCTYPE)
+        frappe.db.commit()
 
 
 def remove_legacy_daily_production_custom_fields() -> None:
