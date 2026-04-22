@@ -32,7 +32,16 @@ fixtures = [
 	},
 	{
 		"dt": "Report",
-		"filters": [["name", "in", ["Per Piece Query Report Simple", "Per Piece Salary Report"]]],
+		"filters": [[
+			"name",
+			"in",
+			[
+				"Per Piece Query Report Simple",
+				"Per Piece Salary Report",
+				"Purchase Order Status Report",
+				"Stock Report",
+			],
+		]],
 	},
 	{
 		"dt": "Server Script",
