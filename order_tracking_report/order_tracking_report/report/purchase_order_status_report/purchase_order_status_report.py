@@ -119,7 +119,6 @@ def build_grouped_data(rows, group_by, expand_all):
         grouped.setdefault(key, []).append(row)
 
     output = []
-    child_rows = []
     group_index = 0
     for group_key in sorted(grouped.keys(), key=lambda d: str(d or "")):
         children = grouped[group_key]
@@ -166,7 +165,7 @@ def build_grouped_data(rows, group_by, expand_all):
         output.append(header)
 
         for idx, row in enumerate(children, start=1):
-            child_rows.append(
+            output.append(
                 {
                     "group_value": f"{idx}",
                     "purchase_order": row.get("purchase_order"),
@@ -183,8 +182,6 @@ def build_grouped_data(rows, group_by, expand_all):
                     "_parent_node": group_id,
                 }
             )
-
-    output.extend(child_rows)
 
     return output
 
