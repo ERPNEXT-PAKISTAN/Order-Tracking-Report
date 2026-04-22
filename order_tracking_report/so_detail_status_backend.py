@@ -842,6 +842,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             "FROM `tabPurchase Invoice` pi "
             "JOIN `tabPurchase Invoice Item` pii ON pii.parent = pi.name "
             "WHERE pii.purchase_order IN %(po)s "
+            "AND pi.docstatus != 2 AND LOWER(IFNULL(pi.status, '')) NOT IN ('cancelled', 'canceled') "
             "ORDER BY pi.modified DESC LIMIT 400",
             {"po": tuple(po_names)}
         )
@@ -866,6 +867,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             "FROM `tabDelivery Note` dn "
             "JOIN `tabDelivery Note Item` dni ON dni.parent = dn.name "
             "WHERE dni.against_sales_order = %(so)s "
+            "AND dn.docstatus != 2 AND LOWER(IFNULL(dn.status, '')) NOT IN ('cancelled', 'canceled') "
             "ORDER BY dn.posting_date DESC, dn.modified DESC LIMIT 400",
             {"so": so}
         )
@@ -875,6 +877,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             "FROM `tabSales Invoice` si "
             "JOIN `tabSales Invoice Item` sii ON sii.parent = si.name "
             "WHERE sii.sales_order = %(so)s "
+            "AND si.docstatus != 2 AND LOWER(IFNULL(si.status, '')) NOT IN ('cancelled', 'canceled') "
             "ORDER BY si.posting_date DESC, si.modified DESC LIMIT 400",
             {"so": so}
         )
@@ -932,17 +935,21 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
         so_item_names = [row.get("name") for row in so_items if row.get("name")]
     
         dn_rows = safe_sql(
-            "SELECT item_code, SUM(qty) AS delivered_qty "
-            "FROM `tabDelivery Note Item` "
-            "WHERE against_sales_order = %(so)s "
+            "SELECT dni.item_code, SUM(dni.qty) AS delivered_qty "
+            "FROM `tabDelivery Note Item` dni "
+            "JOIN `tabDelivery Note` dn ON dn.name = dni.parent "
+            "WHERE dni.against_sales_order = %(so)s "
+            "AND dn.docstatus != 2 AND LOWER(IFNULL(dn.status, '')) NOT IN ('cancelled', 'canceled') "
             "GROUP BY item_code",
             {"so": so}
         )
-    
+
         si_rows = safe_sql(
-            "SELECT item_code, SUM(qty) AS invoiced_qty "
-            "FROM `tabSales Invoice Item` "
-            "WHERE sales_order = %(so)s "
+            "SELECT sii.item_code, SUM(sii.qty) AS invoiced_qty "
+            "FROM `tabSales Invoice Item` sii "
+            "JOIN `tabSales Invoice` si ON si.name = sii.parent "
+            "WHERE sii.sales_order = %(so)s "
+            "AND si.docstatus != 2 AND LOWER(IFNULL(si.status, '')) NOT IN ('cancelled', 'canceled') "
             "GROUP BY item_code",
             {"so": so}
         )
@@ -965,6 +972,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "FROM `tabProduction Plan Item` ppi "
                 "JOIN `tabProduction Plan` pp ON pp.name = ppi.parent "
                 "WHERE ppi.sales_order = %(so)s OR ppi.sales_order_item IN %(so_items)s "
+                "AND pp.docstatus != 2 AND LOWER(IFNULL(pp.status, '')) NOT IN ('cancelled', 'canceled') "
                 "ORDER BY pp.modified DESC LIMIT 2000",
                 {"so": so, "so_items": tuple(so_item_names)}
             )
@@ -973,6 +981,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "wo.sales_order_item, wo.production_item AS item_code "
                 "FROM `tabWork Order` wo "
                 "WHERE wo.sales_order = %(so)s OR wo.sales_order_item IN %(so_items)s "
+                "AND wo.docstatus != 2 AND LOWER(IFNULL(wo.status, '')) NOT IN ('cancelled', 'canceled') "
                 "ORDER BY wo.modified DESC LIMIT 2000",
                 {"so": so, "so_items": tuple(so_item_names)}
             )
@@ -983,6 +992,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "FROM `tabProduction Plan Item` ppi "
                 "JOIN `tabProduction Plan` pp ON pp.name = ppi.parent "
                 "WHERE ppi.sales_order = %(so)s "
+                "AND pp.docstatus != 2 AND LOWER(IFNULL(pp.status, '')) NOT IN ('cancelled', 'canceled') "
                 "ORDER BY pp.modified DESC LIMIT 2000",
                 {"so": so}
             )
@@ -991,6 +1001,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "wo.sales_order_item, wo.production_item AS item_code "
                 "FROM `tabWork Order` wo "
                 "WHERE wo.sales_order = %(so)s "
+                "AND wo.docstatus != 2 AND LOWER(IFNULL(wo.status, '')) NOT IN ('cancelled', 'canceled') "
                 "ORDER BY wo.modified DESC LIMIT 2000",
                 {"so": so}
             )
@@ -2024,7 +2035,11 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
     
         # include POs directly linked by sales_order in PO Item as fallback
         po_fallback = safe_sql(
-            "SELECT DISTINCT parent AS purchase_order FROM `tabPurchase Order Item` WHERE sales_order = %(so)s",
+            "SELECT DISTINCT poi.parent AS purchase_order "
+            "FROM `tabPurchase Order Item` poi "
+            "JOIN `tabPurchase Order` po ON po.name = poi.parent "
+            "WHERE poi.sales_order = %(so)s "
+            "AND po.docstatus != 2 AND LOWER(IFNULL(po.status, '')) NOT IN ('cancelled', 'canceled')",
             {"so": so}
         )
         for r in po_fallback:
@@ -2036,7 +2051,10 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
         po_item_sum_map = {}
         if po_names:
             po_meta = safe_sql(
-                "SELECT name, supplier, status, docstatus, grand_total, rounded_total FROM `tabPurchase Order` WHERE name IN %(po)s",
+                "SELECT name, supplier, status, docstatus, grand_total, rounded_total "
+                "FROM `tabPurchase Order` "
+                "WHERE name IN %(po)s "
+                "AND docstatus != 2 AND LOWER(IFNULL(status, '')) NOT IN ('cancelled', 'canceled')",
                 {"po": tuple(po_names)}
             )
             for p in po_meta:
@@ -2059,6 +2077,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "FROM `tabPurchase Receipt Item` pri "
                 "JOIN `tabPurchase Receipt` pr ON pr.name = pri.parent "
                 "WHERE pri.purchase_order IN %(po)s "
+                "AND pr.docstatus != 2 AND LOWER(IFNULL(pr.status, '')) NOT IN ('cancelled', 'canceled') "
                 "GROUP BY pri.purchase_order, pr.name, pr.status "
                 "ORDER BY pr.posting_date DESC, pr.modified DESC",
                 {"po": tuple(po_names)}
@@ -2074,6 +2093,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "FROM `tabPurchase Invoice Item` pii "
                 "JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent "
                 "WHERE pii.purchase_order IN %(po)s "
+                "AND pi.docstatus != 2 AND LOWER(IFNULL(pi.status, '')) NOT IN ('cancelled', 'canceled') "
                 "GROUP BY pii.purchase_order, pi.name, pi.status "
                 "ORDER BY pi.posting_date DESC, pi.modified DESC",
                 {"po": tuple(po_names)}
@@ -2587,6 +2607,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "FROM `tabProduction Plan Item` ppi "
                 "JOIN `tabProduction Plan` pp ON pp.name = ppi.parent "
                 "WHERE ppi.sales_order = %(so)s OR ppi.sales_order_item IN %(so_items)s "
+                "AND pp.docstatus != 2 AND LOWER(IFNULL(pp.status, '')) NOT IN ('cancelled', 'canceled') "
                 "ORDER BY pp.modified DESC LIMIT 2000",
                 {"so": so, "so_items": tuple(so_item_names)}
             )
@@ -2603,6 +2624,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "FROM `tabDelivery Note` dn "
                 "JOIN `tabDelivery Note Item` dni ON dni.parent = dn.name "
                 "WHERE dni.against_sales_order = %(so)s OR dni.so_detail IN %(so_items)s "
+                "AND dn.docstatus != 2 AND LOWER(IFNULL(dn.status, '')) NOT IN ('cancelled', 'canceled') "
                 "ORDER BY dn.posting_date DESC, dn.modified DESC LIMIT 2000",
                 {"so": so, "so_items": tuple(so_item_names)}
             )
@@ -2611,6 +2633,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "FROM `tabSales Invoice` si "
                 "JOIN `tabSales Invoice Item` sii ON sii.parent = si.name "
                 "WHERE sii.sales_order = %(so)s OR sii.so_detail IN %(so_items)s "
+                "AND si.docstatus != 2 AND LOWER(IFNULL(si.status, '')) NOT IN ('cancelled', 'canceled') "
                 "ORDER BY si.posting_date DESC, si.modified DESC LIMIT 2000",
                 {"so": so, "so_items": tuple(so_item_names)}
             )
@@ -2620,6 +2643,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "FROM `tabProduction Plan Item` ppi "
                 "JOIN `tabProduction Plan` pp ON pp.name = ppi.parent "
                 "WHERE ppi.sales_order = %(so)s "
+                "AND pp.docstatus != 2 AND LOWER(IFNULL(pp.status, '')) NOT IN ('cancelled', 'canceled') "
                 "ORDER BY pp.modified DESC LIMIT 2000",
                 {"so": so}
             )
@@ -2636,6 +2660,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "FROM `tabDelivery Note` dn "
                 "JOIN `tabDelivery Note Item` dni ON dni.parent = dn.name "
                 "WHERE dni.against_sales_order = %(so)s "
+                "AND dn.docstatus != 2 AND LOWER(IFNULL(dn.status, '')) NOT IN ('cancelled', 'canceled') "
                 "ORDER BY dn.posting_date DESC, dn.modified DESC LIMIT 2000",
                 {"so": so}
             )
@@ -2644,6 +2669,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                 "FROM `tabSales Invoice` si "
                 "JOIN `tabSales Invoice Item` sii ON sii.parent = si.name "
                 "WHERE sii.sales_order = %(so)s "
+                "AND si.docstatus != 2 AND LOWER(IFNULL(si.status, '')) NOT IN ('cancelled', 'canceled') "
                 "ORDER BY si.posting_date DESC, si.modified DESC LIMIT 2000",
                 {"so": so}
             )
@@ -2695,7 +2721,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             stock_entry_rows = safe_sql(
                 "SELECT name, docstatus, purpose, posting_date, work_order "
                 "FROM `tabStock Entry` "
-                "WHERE work_order IN %(wo)s "
+                "WHERE work_order IN %(wo)s AND docstatus != 2 "
                 "ORDER BY posting_date DESC, modified DESC LIMIT 4000",
                 {"wo": tuple(work_order_names)}
             )
@@ -2862,7 +2888,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                     "SELECT DISTINCT pi.name, pi.status, pi.posting_date, pii.item_code, pii.po_detail "
                     "FROM `tabPurchase Invoice` pi "
                     "JOIN `tabPurchase Invoice Item` pii ON pii.parent = pi.name "
-                    "WHERE pi.docstatus != 2 AND pii.po_detail IN %(po_items)s "
+                    "WHERE pi.docstatus != 2 AND LOWER(IFNULL(pi.status, '')) NOT IN ('cancelled', 'canceled') AND pii.po_detail IN %(po_items)s "
                     "ORDER BY pi.posting_date DESC, pi.modified DESC LIMIT 4000",
                     {"po_items": tuple(po_item_names)}
                 )
@@ -2873,7 +2899,7 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
                     "SELECT DISTINCT pi.name, pi.status, pi.posting_date, pii.item_code, '' AS po_detail "
                     "FROM `tabPurchase Invoice` pi "
                     "JOIN `tabPurchase Invoice Item` pii ON pii.parent = pi.name "
-                    "WHERE pi.docstatus != 2 AND pii.purchase_receipt IN %(pr)s "
+                    "WHERE pi.docstatus != 2 AND LOWER(IFNULL(pi.status, '')) NOT IN ('cancelled', 'canceled') AND pii.purchase_receipt IN %(pr)s "
                     "ORDER BY pi.posting_date DESC, pi.modified DESC LIMIT 4000",
                     {"pr": tuple(pr_names)}
                 )

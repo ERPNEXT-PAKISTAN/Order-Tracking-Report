@@ -151,7 +151,9 @@ frappe.ui.form.on("Sales Order", {
     const f = frm.get_field("custom_detail_status");
     if (!f) return;
 
-    const currentLocation = (frm.__connection_stock_location || "Stores - AH").trim();
+    const defaultLocation = getDefaultWarehouse("source", frm.doc.company || "");
+    const currentLocation = (frm.__connection_stock_location || defaultLocation).trim();
+    frm.__connection_stock_location = currentLocation;
     f.$wrapper.html(`
       <div class="so-connection-filter" style="display:flex;gap:8px;align-items:end;flex-wrap:nowrap;margin-bottom:10px;">
         <div data-field="stock_location" style="min-width:260px;flex:1 1 260px;"></div>
@@ -183,8 +185,8 @@ frappe.ui.form.on("Sales Order", {
     });
 
     f.$wrapper.find('[data-action="clear-stock-location"]').off("click").on("click", () => {
-      if (frm.__connection_stock_location !== "Stores - AH") {
-        frm.__connection_stock_location = "Stores - AH";
+      if (frm.__connection_stock_location !== defaultLocation) {
+        frm.__connection_stock_location = defaultLocation;
         frm.trigger("render_execution_dashboard");
       }
     });
@@ -198,7 +200,8 @@ frappe.ui.form.on("Sales Order", {
         stock_location: (frm.__connection_stock_location || "").trim(),
       },
       callback: (r) => {
-        const data = (r && r.message) ? r.message : {};
+        const rawData = (r && r.message) ? r.message : {};
+        const data = filterCancelledConnectionData(rawData);
         frm.__connection_stock_location = (data.stock_location || frm.__connection_stock_location || "").trim();
         cacheMaterialShortageItemGroups(frm, data);
         $dashboardBody.html(buildDashboard(frm, data));
@@ -854,7 +857,7 @@ function empLogsTable(rows){
   </div>`;
 }
 
-function bomTree(tree){
+function __legacy_bomTree_1(tree){
   tree = tree || [];
   if(!tree.length) return `<div class="text-muted">No Active BOM found.</div>`;
 
@@ -974,7 +977,7 @@ function productionTree(tree){
   return html;
 }
 
-function materialShortageTable(rows){
+function __legacy_materialShortageTable_1(rows){
   rows = rows || [];
   const body = rows.length ? rows.map(r => `
     <tr>
@@ -1007,7 +1010,10 @@ function materialShortageTable(rows){
 }
 
 function deliveryHierarchy(rows){
-  rows = rows || [];
+  rows = _filterCancelledRows(rows || []).map((d) => ({
+    ...d,
+    invoices: _filterCancelledRows(d.invoices || []),
+  }));
   if(!rows.length) return `<div class="text-muted">No delivery or billing records.</div>`;
 
   const body = rows.map(d=>{
@@ -1108,7 +1114,7 @@ function employeeEfficiency(rows){
 }
 
 function timelineView(rows){
-  rows = rows || [];
+  rows = _filterCancelledRows(rows || []);
   if(!rows.length) return `<div class="text-muted">No timeline data found.</div>`;
 
   const body = rows.map(r=>{
@@ -1166,33 +1172,33 @@ function deliveryPredictionCard(p){
   `;
 }
 
-function profitSummaryCard(s){
-  rows = (rows || []).filter(d => String(d.status || d.docstatus || "").toLowerCase() !== "cancelled" && String(d.docstatus) !== "2");
-  if(!rows.length) return `<div class="text-muted">No delivery or billing records.</div>`;
+function __legacy_profitSummaryCard_1(s){
+  s = s || {};
+  return `
+    <div class="so-grid-3">
+      <div class="so-mini-card">
+        <div class="so-mini-title">SALES</div>
+        <div class="so-mini-val">${fmtCurrency(s.sales_amount || 0)}</div>
+      </div>
+      <div class="so-mini-card">
+        <div class="so-mini-title">ESTIMATED COST</div>
+        <div class="so-mini-val">${fmtCurrency(s.estimated_cost || 0)}</div>
+      </div>
+      <div class="so-mini-card">
+        <div class="so-mini-title">ESTIMATED PROFIT</div>
+        <div class="so-mini-val">${fmtCurrency(s.estimated_profit || 0)}</div>
+      </div>
+    </div>
+    <div style="margin-top:10px;font-weight:900;">Margin: ${esc(s.margin_pct || 0)}%</div>
+  `;
+}
 
-  const body = rows.map(d=>{
-    const dnCell = d.delivery_note
-      ? `${docPopupLink("Delivery Note", d.delivery_note)}<div class="muted">${badge(d.status)} • ${esc(fmtDT(d.posting_date))}</div>`
-      : `<span class="muted">Invoices without Delivery Note</span>`;
-
-    const invs = (d.invoices || []).filter(i => String(i.status || i.docstatus || "").toLowerCase() !== "cancelled" && String(i.docstatus) !== "2").length
-      ? (d.invoices || []).filter(i => String(i.status || i.docstatus || "").toLowerCase() !== "cancelled" && String(i.docstatus) !== "2").map(i => `
-          <div style="margin-bottom:6px;">
-            ${docPopupLink("Sales Invoice", i.name)}
-            <span class="muted"> ${badge(i.status)} • ${esc(fmtDT(i.posting_date))}</span>
-          </div>
-        `).join("")
-      : `<span class="text-muted">No invoices</span>`;
-
-    return `<tr><td>${dnCell}</td><td>${invs}</td></tr>`;
-  }).join("");
-
-  return `<div class="table-responsive">
-    <table class="table table-bordered so-table" style="margin:0;">
-      <thead><tr><th style="width:280px;">Delivery Note</th><th>Invoices</th></tr></thead>
-      <tbody>${body}</tbody>
-    </table>
-  </div>`;
+function __legacy_profitByItemTable_1(rows){
+  rows = rows || [];
+  const body = rows.length ? rows.map(r => `
+    <tr>
+      <td>${esc(r.item_code||"")}</td>
+      <td style="text-align:right;">${soFlt(r.qty)}</td>
       <td>${esc(r.default_bom || "—")}</td>
       <td style="text-align:right;">${fmtCurrency(r.bom_unit_cost)}</td>
       <td style="text-align:right;">${fmtCurrency(r.sales_amount)}</td>
@@ -1226,7 +1232,7 @@ function poAnalyticsOverviewCard(overview){
   `;
 }
 
-function poStatusDetailTable(rows){
+function __legacy_poStatusDetailTable_1(rows){
   rows = rows || [];
   const body = rows.length ? rows.map(r => `
     <tr>
@@ -1254,7 +1260,7 @@ function poStatusDetailTable(rows){
   </table></div>`;
 }
 
-function poItemGroupTable(rows){
+function __legacy_poItemGroupTable_1(rows){
   rows = rows || [];
   const body = rows.length ? rows.map(r => `
     <tr>
@@ -1280,7 +1286,7 @@ function poItemGroupTable(rows){
   </table></div>`;
 }
 
-function poAnalyticsSection(data){
+function __legacy_poAnalyticsSection_1(data){
   const d = data || {};
   return `
     ${poAnalyticsOverviewCard(d.overview || {})}
@@ -1291,7 +1297,7 @@ function poAnalyticsSection(data){
   `;
 }
 
-function buildDashboard(frm, data){
+function __legacy_buildDashboard_1(frm, data){
   const totals = data.production_totals || {};
   return `
     ${css()}
@@ -1496,6 +1502,90 @@ function splitDocNames(value) {
   return String(value || "").split(",").map((name) => (name || "").trim()).filter(Boolean);
 }
 
+function _statusText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function _isCancelledStatus(value) {
+  const status = _statusText(value);
+  return status === "cancelled" || status === "canceled";
+}
+
+function _isCancelledDocRow(row) {
+  if (!row || typeof row !== "object") return false;
+  if (String(row.docstatus || "") === "2") return true;
+  return [
+    row.status,
+    row.po_status,
+    row.pr_status,
+    row.pi_status,
+    row.posting_status,
+  ].some(_isCancelledStatus);
+}
+
+function _filterCancelledRows(rows) {
+  return (rows || []).filter((row) => !_isCancelledDocRow(row));
+}
+
+function filterCancelledConnectionData(data) {
+  const source = data || {};
+  const out = { ...source };
+
+  out.sales_fulfillment_hierarchy = _filterCancelledRows(source.sales_fulfillment_hierarchy || []).map((row) => {
+    const invoices = _filterCancelledRows(row.invoices || []);
+    return { ...row, invoices };
+  }).filter((row) => (row.delivery_note || row.invoices.length));
+
+  out.gantt_timeline = _filterCancelledRows(source.gantt_timeline || []);
+  out.delivery_note_options = _filterCancelledRows(source.delivery_note_options || []);
+  out.order_item_summary = _filterCancelledRows(source.order_item_summary || []);
+  out.purchase_flow_rows = _filterCancelledRows(source.purchase_flow_rows || []).map((row) => ({
+    ...row,
+    purchase_receipts: _isCancelledStatus(row.pr_status) ? "" : (row.purchase_receipts || ""),
+    pr_status: _isCancelledStatus(row.pr_status) ? "" : (row.pr_status || ""),
+    purchase_invoices: _isCancelledStatus(row.pi_status) ? "" : (row.purchase_invoices || ""),
+    pi_status: _isCancelledStatus(row.pi_status) ? "" : (row.pi_status || ""),
+  }));
+
+  const analytics = source.custom_po_analytics || {};
+  out.custom_po_analytics = {
+    ...analytics,
+    item_group_rows: _filterCancelledRows(analytics.item_group_rows || []),
+    po_status_rows: _filterCancelledRows(analytics.po_status_rows || []),
+  };
+
+  out.item_document_links = (source.item_document_links || []).map((row) => ({
+    ...row,
+    production_plans: _filterCancelledRows(row.production_plans || []),
+    work_orders: _filterCancelledRows(row.work_orders || []),
+    job_cards: _filterCancelledRows(row.job_cards || []),
+    stock_entries: _filterCancelledRows(row.stock_entries || []),
+    purchase_orders: _filterCancelledRows(row.purchase_orders || []),
+    purchase_receipts: _filterCancelledRows(row.purchase_receipts || []),
+    purchase_invoices: _filterCancelledRows(row.purchase_invoices || []),
+    salary_slips: _filterCancelledRows(row.salary_slips || []),
+    delivery_notes: _filterCancelledRows(row.delivery_notes || []),
+    sales_invoices: _filterCancelledRows(row.sales_invoices || []),
+  }));
+
+  out.production_tree = (source.production_tree || []).map((node) => {
+    const productionPlan = (node && node.production_plan) || {};
+    const workOrders = _filterCancelledRows((node && node.work_orders) || []).map((wo) => ({
+      ...wo,
+      job_cards: _filterCancelledRows(wo.job_cards || []),
+    }));
+    const keepProductionPlan = productionPlan && !_isCancelledDocRow(productionPlan);
+    if (!keepProductionPlan && !workOrders.length) return null;
+    return {
+      ...node,
+      production_plan: keepProductionPlan ? productionPlan : {},
+      work_orders: workOrders,
+    };
+  }).filter(Boolean);
+
+  return out;
+}
+
 function relatedDocChip(doctype, name) {
   const slugMap = {
     "Sales Order": "sales-order",
@@ -1522,7 +1612,7 @@ function sectionHeading(title, color){
   return `<div style="margin:14px 0 8px 0;padding:10px 12px;border-radius:12px;background:${color};color:#fff;font-size:14px;font-weight:900;letter-spacing:.2px;">${esc(title)}</div>`;
 }
 
-function purchaseFlowTable(rows){
+function __legacy_purchaseFlowTable_1(rows){
   rows = rows || [];
   const body = rows.length ? rows.map(r => `
     <tr>
@@ -1555,7 +1645,7 @@ function purchaseFlowTable(rows){
   </table></div>`;
 }
 
-function labourCostTable(rows, summary){
+function __legacy_labourCostTable_1(rows, summary){
   rows = rows || [];
   summary = summary || {};
   const body = rows.length ? rows.map(r => `
@@ -1583,7 +1673,7 @@ function labourCostTable(rows, summary){
 }
 
 // override grouped shortage view
-function materialShortageTable(rows){
+function __legacy_materialShortageTable_2(rows){
   rows = rows || [];
   const body = rows.length ? rows.map(r => `
     <tr>
@@ -1616,7 +1706,7 @@ function materialShortageTable(rows){
 }
 
 // override item-group table to include subgroup items
-function poItemGroupTable(rows){
+function __legacy_poItemGroupTable_2(rows){
   rows = rows || [];
   const body = rows.length ? rows.map(r => `
     <tr>
@@ -1645,7 +1735,7 @@ function poItemGroupTable(rows){
 }
 
 // override main dashboard layout for grouped professional sections
-function buildDashboard(frm, data){
+function __legacy_buildDashboard_2(frm, data){
   const totals = data.production_totals || {};
   return `
     ${css()}
@@ -1712,7 +1802,7 @@ function bindSectionToggles($wrap){
   });
 }
 
-function sectionBlock(key, title, color, content, show=true){
+function __legacy_sectionBlock_1(key, title, color, content, show=true){
   return `
     <div style="margin:14px 0 8px 0;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
       <div data-section-toggle="1" data-section-key="${esc(key)}" style="cursor:pointer;padding:10px 12px;background:${color};color:#fff;font-size:14px;font-weight:900;display:flex;justify-content:space-between;align-items:center;">
@@ -1729,7 +1819,7 @@ function sectionBlock(key, title, color, content, show=true){
   `;
 }
 
-function materialShortageTable(rows){
+function __legacy_materialShortageTable_3(rows){
   rows = rows || [];
   if(!rows.length){
     return `<div class="text-muted">No grouped shortage found.</div>`;
@@ -1777,7 +1867,7 @@ function materialShortageTable(rows){
   </div>`;
 }
 
-function buildDashboard(frm, data){
+function __legacy_buildDashboard_3(frm, data){
   const totals = data.production_totals || {};
   return `
     ${css()}
@@ -1839,7 +1929,7 @@ function sectionBlock(key, title, color, content, show=true){
   `;
 }
 
-function materialShortageTable(rows){
+function __legacy_materialShortageTable_4(rows){
   rows = rows || [];
   if(!rows.length){
     return `<div class="text-muted">No grouped shortage found.</div>`;
@@ -1893,7 +1983,7 @@ function materialShortageTable(rows){
   </div>`;
 }
 
-function poItemGroupTable(rows){
+function __legacy_poItemGroupTable_3(rows){
   rows = rows || [];
   if(!rows.length){
     return `<div class="text-muted">No item-group analytics found.</div>`;
@@ -1941,7 +2031,7 @@ function poItemGroupTable(rows){
   </table></div>`;
 }
 
-function poAnalyticsSection(data){
+function __legacy_poAnalyticsSection_2(data){
   const d = data || {};
   return `
     ${poAnalyticsOverviewCard(d.overview || {})}
@@ -1952,7 +2042,7 @@ function poAnalyticsSection(data){
   `;
 }
 
-function bomTree(tree){
+function __legacy_bomTree_2(tree){
   tree = tree || [];
   if(!tree.length) return `<div class="text-muted">No Active BOM found.</div>`;
 
@@ -1994,7 +2084,7 @@ function bomTree(tree){
   return html;
 }
 
-function profitGroupPurchaseTable(rows){
+function __legacy_profitGroupPurchaseTable_1(rows){
   rows = rows || [];
   const body = rows.length ? rows.map(r => `
     <tr>
@@ -2008,7 +2098,7 @@ function profitGroupPurchaseTable(rows){
   </table></div>`;
 }
 
-function buildDashboard(frm, data){
+function __legacy_buildDashboard_4(frm, data){
   const totals = data.production_totals || {};
   return `
     ${css()}
@@ -2054,7 +2144,7 @@ function buildDashboard(frm, data){
 }
 
 
-function labourCostTable(rows, summary){
+function __legacy_labourCostTable_2(rows, summary){
   rows = rows || [];
   summary = summary || {};
   const body = rows.length ? rows.map(r => `
@@ -2087,7 +2177,7 @@ function labourCostTable(rows, summary){
   `;
 }
 
-function poItemGroupTable(rows){
+function __legacy_poItemGroupTable_4(rows){
   rows = rows || [];
   if(!rows.length){
     return `<div class="text-muted">No item-group analytics found.</div>`;
@@ -2143,7 +2233,7 @@ function poItemGroupTable(rows){
   </table></div>`;
 }
 
-function materialShortageTable(rows){
+function __legacy_materialShortageTable_5(rows){
   rows = rows || [];
   if(!rows.length){
     return `<div class="text-muted">No grouped shortage found.</div>`;
@@ -2296,6 +2386,111 @@ function dailyOperationWiseProductionTable(payload){
   return html.join("");
 }
 
+function dailyOperationSummaryData(payload, salesOrder) {
+  const groups = (payload && payload.groups) || [];
+  const initialOps = Array.isArray(payload && payload.operations) ? payload.operations : [];
+  const targetSalesOrder = String(salesOrder || "").trim();
+  const opSet = {};
+  initialOps.forEach((op) => {
+    const key = String(op || "").trim();
+    if (key) opSet[key] = 1;
+  });
+  const itemMap = {};
+
+  groups.forEach((group) => {
+    const so = String(group.sales_order || "").trim();
+    if (targetSalesOrder && so && so !== targetSalesOrder) return;
+    (group.items || []).forEach((item) => {
+      const code = String(item.item || "").trim();
+      if (!code) return;
+      if (!itemMap[code]) itemMap[code] = { order_qty: 0, totals: {} };
+      itemMap[code].order_qty += Number(item.order_qty || 0);
+      const itemTotals = item.totals || {};
+      Object.keys(itemTotals).forEach((operation) => {
+        const op = String(operation || "").trim();
+        if (!op) return;
+        opSet[op] = 1;
+        itemMap[code].totals[op] = Number(itemMap[code].totals[op] || 0) + Number(itemTotals[operation] || 0);
+      });
+    });
+  });
+
+  const operations = Object.keys(opSet).sort((a, b) => a.localeCompare(b));
+  return { operations, items: itemMap };
+}
+
+function dailyOperationItemQtyMap(payload, salesOrder) {
+  const summary = dailyOperationSummaryData(payload, salesOrder);
+  const itemMap = summary.items || {};
+  const qtyMap = {};
+  Object.keys(itemMap).forEach((code) => {
+    qtyMap[code] = Number((itemMap[code] || {}).order_qty || 0);
+  });
+  return qtyMap;
+}
+
+function dailyOperationItemSummaryHtml(summaryData, selectedItem, options) {
+  const opts = options || {};
+  const showItemTotalsTable = opts.show_item_totals_table !== false;
+  const itemMap = (summaryData && summaryData.items) || {};
+  const operations = (summaryData && summaryData.operations) || [];
+  const itemQtyMap = {};
+  Object.keys(itemMap).forEach((code) => {
+    itemQtyMap[code] = Number((itemMap[code] || {}).order_qty || 0);
+  });
+  const keys = Object.keys(itemQtyMap || {}).sort((a, b) => a.localeCompare(b));
+  if (!keys.length) {
+    return `<div style="margin-bottom:10px;padding:10px;border:1px solid #dbeafe;border-radius:10px;background:#eff6ff;color:#1d4ed8;font-size:12px;">${__("Daily Operation wise Production summary is not available for this Sales Order.")}</div>`;
+  }
+  const highlight = String(selectedItem || "").trim();
+  const rows = keys.map((code) => {
+    const qty = Number(itemQtyMap[code] || 0);
+    const isSelected = highlight && code === highlight;
+    return `<tr style="${isSelected ? "background:#f0f9ff;" : ""}"><td style="font-weight:${isSelected ? 800 : 600};">${esc(code)}</td><td style="text-align:right;font-weight:800;color:#0f172a;">${_n0(qty)}</td></tr>`;
+  }).join("");
+  return `
+    <div style="margin-bottom:10px;">
+      ${showItemTotalsTable ? `
+        <div style="font-size:12px;font-weight:800;color:#1d4ed8;margin-bottom:6px;">${__("Daily Operation wise Production (Item Total Qty)")}</div>
+        <div class="table-responsive">
+          <table class="table table-bordered so-table" style="margin:0;">
+            <thead><tr><th>${__("Item")}</th><th style="text-align:right;">${__("Total Qty")}</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      ` : ""}
+      ${operations.length ? (() => {
+        const opsHead = operations.map((operation) => `<th style="text-align:right;">${esc(operation)}</th>`).join("");
+        const totalByOp = {};
+        operations.forEach((operation) => { totalByOp[operation] = 0; });
+        const opRows = keys.map((code) => {
+          const row = itemMap[code] || {};
+          const isSelected = highlight && code === highlight;
+          const cells = operations.map((operation) => {
+            const val = Number((row.totals || {})[operation] || 0);
+            totalByOp[operation] += val;
+            return `<td style="text-align:right;font-weight:${isSelected ? 800 : 700};">${_n0(val)}</td>`;
+          }).join("");
+          return `<tr style="${isSelected ? "background:#f0f9ff;" : ""}"><td style="font-weight:${isSelected ? 800 : 600};">${esc(code)}</td>${cells}</tr>`;
+        }).join("");
+        const grandCells = operations.map((operation) => `<td style="text-align:right;font-weight:900;color:#1d4ed8;">${_n0(totalByOp[operation] || 0)}</td>`).join("");
+        return `
+          <div style="font-size:12px;font-weight:800;color:#1d4ed8;margin:10px 0 6px;">${__("Operation Total Summary")}</div>
+          <div class="table-responsive">
+            <table class="table table-bordered so-table" style="margin:0;">
+              <thead><tr><th>${__("Item")}</th>${opsHead}</tr></thead>
+              <tbody>
+                ${opRows}
+                <tr><td style="font-weight:900;color:#1d4ed8;">${__("Grand Total")}</td>${grandCells}</tr>
+              </tbody>
+            </table>
+          </div>
+        `;
+      })() : ""}
+    </div>
+  `;
+}
+
 function bindDailyOperationProductionToggles($wrap){
   $wrap.find("[data-dop-item-toggle]").off("click").on("click", function(e){
     e.preventDefault();
@@ -2327,7 +2522,7 @@ function bindDailyOperationProductionToggles($wrap){
   });
 }
 
-function buildDashboard(frm, data){
+function __legacy_buildDashboard_5(frm, data){
   const totals = data.production_totals || {};
   const poTotal = poTotalAmount(data.po_item_group_summary || []);
   return `
@@ -2467,7 +2662,43 @@ function _n2(v) { return Number(v || 0).toLocaleString(undefined, { minimumFract
 function _money0(v) {
   try { return format_currency(_int(v || 0), null, 0); } catch (e) { return _n0(v); }
 }
-const DEFAULT_MATERIAL_SHORTAGE_GROUP_WAREHOUSE = "Stores - AH";
+function getCompanyAbbr(company) {
+  if (!company) return "";
+  if (COMPANY_ABBR_CACHE[company]) return COMPANY_ABBR_CACHE[company];
+  // Try to use abbreviation pattern (e.g., "Test Company Pvt Ltd" -> "TCPL")
+  const abbr = (company.match(/\b([A-Z])[A-Z]+/g) || []).join("") || company.split(" ").map(w => w[0]).join("");
+  COMPANY_ABBR_CACHE[company] = abbr;
+  return COMPANY_ABBR_CACHE[company];
+}
+
+const COMPANY_ABBR_CACHE = {};
+const DEFAULT_WAREHOUSE_LABELS = {
+  source: "Store",
+  wip: "Work In Progress",
+  target: "Finished Goods",
+  scrap: "Work In Progress"
+};
+
+function fetchCompanyAbbr(company) {
+  const key = String(company || "").trim();
+  if (!key) return Promise.resolve("");
+  if (COMPANY_ABBR_CACHE[key]) return Promise.resolve(COMPANY_ABBR_CACHE[key]);
+  return frappe.db.get_value("Company", key, "abbr").then((r) => {
+    const abbr = ((r && r.message && r.message.abbr) || "").trim() || getCompanyAbbr(key);
+    COMPANY_ABBR_CACHE[key] = abbr;
+    return abbr;
+  }).catch(() => {
+    const fallback = getCompanyAbbr(key);
+    COMPANY_ABBR_CACHE[key] = fallback;
+    return fallback;
+  });
+}
+
+function getDefaultWarehouse(type, company, abbrOverride) {
+  const abbr = String(abbrOverride || "").trim() || getCompanyAbbr(company);
+  let label = DEFAULT_WAREHOUSE_LABELS[type] || "Store";
+  return abbr ? `${label} - ${abbr}` : label;
+}
 
 function open_po_item_data_entry(frm, prefill) {
   if (frm.doc.docstatus === 2) {
@@ -2556,15 +2787,8 @@ function open_po_item_data_entry(frm, prefill) {
   });
 
   // Set default warehouse logic
-  const getDefaultWarehouse = () => {
-    // Company-specific logic: e.g., "Stores - {Company Abbr}" or fallback
-    if (frm.doc.company) {
-      // Try to use company abbreviation if available
-      const abbr = (frm.doc.company.match(/\b([A-Z])[A-Z]+/g) || []).join("") || frm.doc.company.split(" ").map(w => w[0]).join("");
-      return `Stores - ${abbr}`;
-    }
-    return DEFAULT_MATERIAL_SHORTAGE_GROUP_WAREHOUSE;
-  };
+  // Use new warehouse logic
+  const resolveDefaultWarehouse = (type = "source") => getDefaultWarehouse(type, frm.doc.company);
 
   dialog.fields_dict.warehouse.get_query = () => ({
     filters: {
@@ -2574,9 +2798,18 @@ function open_po_item_data_entry(frm, prefill) {
   });
   // Set default value on dialog open
   dialog.on('show', () => {
+    const fallbackWarehouse = resolveDefaultWarehouse();
     if (!dialog.get_value('warehouse')) {
-      dialog.set_value('warehouse', getDefaultWarehouse());
+      dialog.set_value('warehouse', fallbackWarehouse);
     }
+    const company = frm.doc.company || "";
+    void fetchCompanyAbbr(company).then((abbr) => {
+      const exactWarehouse = getDefaultWarehouse("source", company, abbr);
+      const currentWarehouse = dialog.get_value("warehouse") || "";
+      if (!currentWarehouse || currentWarehouse === fallbackWarehouse) {
+        dialog.set_value("warehouse", exactWarehouse);
+      }
+    });
   });
 
   dialog.fields_dict.item_group.get_query = () => {
@@ -2698,7 +2931,7 @@ function open_po_item_data_entry(frm, prefill) {
       const extraQty = toNum(typeof row.extra_qty !== "undefined" ? row.extra_qty : previous.extra_qty);
       const poQty = toNum(typeof row.po_qty !== "undefined" ? row.po_qty : (typeof previous.po_qty !== "undefined" ? previous.po_qty : row.qty));
       let warehouse = row.warehouse || dialog.get_value("warehouse") || "";
-      if (!warehouse) warehouse = getDefaultWarehouse();
+      if (!warehouse) warehouse = resolveDefaultWarehouse();
       return {
         ...row,
         supplier: row.supplier || dialog.get_value("supplier") || "",
@@ -3104,7 +3337,7 @@ function open_po_item_data_entry(frm, prefill) {
   }, 150);
 }
 
-function purchaseFlowTable(rows){
+function __legacy_purchaseFlowTable_2(rows){
   rows = rows || [];
   const body = rows.length ? rows.map((r) => `
     <tr>
@@ -3136,7 +3369,7 @@ function purchaseFlowTable(rows){
   </table></div>`;
 }
 
-function materialShortageTable(rows){
+function __legacy_materialShortageTable_6(rows){
   rows = rows || [];
   if(!rows.length) return `<div class="text-muted">No grouped shortage found.</div>`;
   const groupMap = {};
@@ -3278,7 +3511,7 @@ function labourCostTable(rows, summary){
   `;
 }
 
-function buildDashboard(frm, data){
+function __legacy_buildDashboard_6(frm, data){
   const totals = data.production_totals || {};
   const poTotal = poTotalAmount(data.po_item_group_summary || []);
   return `
@@ -3724,8 +3957,15 @@ function _planningRows(frm, data){
     const m = itemMap[k] || { pp: [], pp_statuses: [], wo: [], wo_statuses: [], jc: [], jc_statuses: [], wo_completed_qty: 0, jc_completed_qty: 0, wo_details: [], jc_details: [] };
     const ppList = Array.from(new Set([...(r.pp_list || []), ...(m.pp || [])].filter(Boolean)));
     const ppStatuses = Array.from(new Set([...(r.pp_statuses || []), ...(m.pp_statuses || [])].filter(Boolean)));
-    const woList = Array.from(new Set([...(r.wo_list || []), ...(m.wo || [])].filter(Boolean)));
-    const woStatuses = Array.from(new Set([...(r.wo_statuses || []), ...(m.wo_statuses || [])].filter(Boolean)));
+    const woDetails = (m.wo_details || []).filter((x) => !_isCancelledLikeStatus(x.status));
+    const jcDetails = (m.jc_details || []).filter((x) => !_isCancelledLikeStatus(x.status));
+    const woList = Array.from(new Set(woDetails.map((x) => String(x.name || "").trim()).filter(Boolean)));
+    const woStatuses = woDetails.map((x) => x.status || "");
+    const jcList = Array.from(new Set(jcDetails.map((x) => String(x.name || "").trim()).filter(Boolean)));
+    const jcStatuses = jcDetails.map((x) => x.status || "");
+    const filteredPP = _filterPlanningDocs(ppList, ppStatuses);
+    const filteredWO = { names: woList, statuses: woStatuses.filter((s) => !_isCancelledLikeStatus(s)) };
+    const filteredJC = { names: jcList, statuses: jcStatuses.filter((s) => !_isCancelledLikeStatus(s)) };
     return {
       idx: idx + 1,
       sales_order_item: r.sales_order_item || "",
@@ -3734,16 +3974,16 @@ function _planningRows(frm, data){
       ordered_qty: Number(r.ordered_qty || 0),
       delivered_qty: Number(r.delivered_qty || 0),
       pending_qty: Number(r.pending_qty || 0),
-      pp_list: ppList,
-      pp_statuses: ppStatuses,
-      wo_list: woList,
-      wo_statuses: woStatuses,
-      jc_list: m.jc,
-      jc_statuses: m.jc_statuses,
-      wo_completed_qty: Number(m.wo_completed_qty || 0),
-      jc_completed_qty: Number(m.jc_completed_qty || 0),
-      wo_details: (m.wo_details || []).slice(),
-      jc_details: (m.jc_details || []).slice(),
+      pp_list: filteredPP.names,
+      pp_statuses: filteredPP.statuses,
+      wo_list: filteredWO.names,
+      wo_statuses: filteredWO.statuses,
+      jc_list: filteredJC.names,
+      jc_statuses: filteredJC.statuses,
+      wo_completed_qty: woDetails.reduce((a, x) => a + Number(x.produced_qty || 0), 0),
+      jc_completed_qty: jcDetails.reduce((a, x) => a + Number(x.total_completed_qty || 0), 0),
+      wo_details: woDetails.slice(),
+      jc_details: jcDetails.slice(),
     };
   });
 }
@@ -3751,6 +3991,46 @@ function _planningRows(frm, data){
 function _statusChip(hasAny, allDone){
   if (!hasAny) return `<span class="badge badge-secondary">Not Created</span>`;
   return allDone ? `<span class="badge badge-success">Completed</span>` : `<span class="badge badge-warning">In Progress</span>`;
+}
+
+function _isCancelledLikeStatus(value){
+  const s = String(value || "").trim().toLowerCase();
+  return s.includes("cancel");
+}
+
+function _filterPlanningDocs(names, statuses){
+  const list = (names || []).filter(Boolean);
+  const sts = (statuses || []).filter((x) => String(x || "").trim() !== "");
+  if (!list.length) {
+    return {
+      names: [],
+      statuses: sts.filter((s) => !_isCancelledLikeStatus(s)),
+    };
+  }
+
+  if (sts.length === list.length) {
+    const outNames = [];
+    const outStatuses = [];
+    list.forEach((name, idx) => {
+      const status = sts[idx] || "";
+      if (_isCancelledLikeStatus(status)) return;
+      outNames.push(name);
+      outStatuses.push(status);
+    });
+    return { names: outNames, statuses: outStatuses };
+  }
+
+  if (sts.some((s) => _isCancelledLikeStatus(s)) && list.length === 1) {
+    return {
+      names: [],
+      statuses: sts.filter((s) => !_isCancelledLikeStatus(s)),
+    };
+  }
+
+  return {
+    names: list,
+    statuses: sts.filter((s) => !_isCancelledLikeStatus(s)),
+  };
 }
 
 function _allDoneStatus(statuses){
@@ -4053,6 +4333,8 @@ function bindDashboardActionButtons($wrap, frm, data){
   const planningRows = _planningRows(frm, data || {});
   const itemDocumentLinks = Array.isArray((data || {}).item_document_links) ? data.item_document_links : [];
   const orderItemSummaryRows = Array.isArray((data || {}).order_item_summary) ? data.order_item_summary : [];
+  const dailyOperationSummary = dailyOperationSummaryData((data || {}).daily_operation_report || {}, frm.doc.name || "");
+  const dailyOperationQtyByItem = dailyOperationItemQtyMap((data || {}).daily_operation_report || {}, frm.doc.name || "");
   const primaryItem = (() => {
     const rows = frm.doc.items || [];
     if (!rows.length) return "";
@@ -4074,6 +4356,11 @@ function bindDashboardActionButtons($wrap, frm, data){
   const getSalesOrderRow = (selectedItem) => (frm.doc.items || []).find((row) => String((row.item_code || "").trim()) === String(selectedItem || "").trim()) || null;
   const getLatestRow = (rows) => (rows && rows.length ? rows[0] : null);
   const getPlanningRow = (selectedItem) => planningRows.find((row) => String((row.item_code || "")).trim() === String(selectedItem || "").trim()) || null;
+  const getSuggestedProductionQty = (itemCode, fallbackQty) => {
+    const code = String(itemCode || "").trim();
+    const qty = Number(dailyOperationQtyByItem[code] || 0);
+    return qty > 0 ? qty : Number(fallbackQty || 0);
+  };
 
   const openWoCompletedDetails = (selectedItem) => {
     const row = getPlanningRow(selectedItem);
@@ -4179,10 +4466,11 @@ function bindDashboardActionButtons($wrap, frm, data){
     const filterItem = String(selectedItem || "").trim();
     const rows = (frm.doc.items || []).map((r) => {
       const pending = Number(r.qty || 0) - Number(r.delivered_qty || 0);
+      const fallbackQty = pending > 0 ? pending : Number(r.qty || 0) || 1;
       return {
         item_code: r.item_code || "",
         item_name: r.item_name || r.item_code || "",
-        qty: pending > 0 ? pending : Number(r.qty || 0) || 1,
+        qty: getSuggestedProductionQty(r.item_code || "", fallbackQty) || 1,
         stock_uom: r.uom || r.stock_uom || "",
         sales_order_item: r.name || "",
       };
@@ -4248,7 +4536,7 @@ function bindDashboardActionButtons($wrap, frm, data){
     return submitDoc(doc);
   };
 
-  const openJobCardControlDialog = async (mode, jobCardName, afterUpdate) => {
+  const openJobCardControlDialog = async (mode, jobCardName, selectedItem, afterUpdate) => {
     const jc = await getDoc("Job Card", jobCardName);
     if (!jc) {
       frappe.show_alert({ message: __("Job Card not found."), indicator: "orange" }, 4);
@@ -4263,6 +4551,7 @@ function bindDashboardActionButtons($wrap, frm, data){
       title: isStart ? __("Start Job") : isPause ? __("Pause Job") : __("Complete Job"),
       fields: [
         { fieldtype: "HTML", fieldname: "info_html" },
+        { fieldtype: "HTML", fieldname: "summary_html" },
         { fieldtype: "Section Break" },
         {
           fieldtype: "MultiSelectPills",
@@ -4323,6 +4612,9 @@ function bindDashboardActionButtons($wrap, frm, data){
         <b>${esc(jc.name || jobCardName)}</b> &nbsp; | &nbsp; ${esc(jc.operation || "-")} &nbsp; | &nbsp; ${__("Qty")}: <b>${soFlt(jc.total_completed_qty || 0)}</b> / <b>${soFlt(jc.for_quantity || 0)}</b>
       </div>
     `);
+    dialog.fields_dict.summary_html.$wrapper.html(
+      dailyOperationItemSummaryHtml(dailyOperationSummary, selectedItem || "", { show_item_totals_table: false })
+    );
     dialog.show();
   };
 
@@ -4374,6 +4666,8 @@ function bindDashboardActionButtons($wrap, frm, data){
 
   const openProductionPlanCreator = (seed) => {
     const rows = [];
+    const selectedItem = String(seed.item_code || "").trim();
+    const summaryHtml = dailyOperationItemSummaryHtml(dailyOperationSummary, selectedItem, { show_item_totals_table: false });
     const d = new frappe.ui.Dialog({
       title: __("Create Production Plan"),
       size: "extra-large",
@@ -4388,13 +4682,13 @@ function bindDashboardActionButtons($wrap, frm, data){
         { fieldtype: "Section Break" },
         { fieldtype: "Datetime", fieldname: "planned_start_date", label: __("Default Planned Start"), default: frappe.datetime.now_datetime(), reqd: 1 },
         { fieldtype: "Column Break" },
-        { fieldtype: "Link", fieldname: "default_fg_warehouse", label: __("Default FG Warehouse"), options: "Warehouse", default: frm.doc.set_warehouse || "" },
+        { fieldtype: "Link", fieldname: "default_fg_warehouse", label: __("Default FG Warehouse"), options: "Warehouse", default: getDefaultWarehouse("target", seed.company || frm.doc.company || "") },
         { fieldtype: "Column Break" },
         { fieldtype: "Button", fieldname: "load_sales_order_items", label: __("Load Sales Order Items") },
         { fieldtype: "Section Break" },
         { fieldtype: "Check", fieldname: "submit_after_create", label: __("Submit after create"), default: 0 },
         { fieldtype: "Column Break" },
-        { fieldtype: "Check", fieldname: "create_work_orders_after_submit", label: __("Create Work Orders after submit"), default: 0 },
+        { fieldtype: "Check", fieldname: "create_work_orders_after_submit", label: __("Create Work Orders after submit"), default: 1 },
         { fieldtype: "Section Break" },
         {
           fieldtype: "Table",
@@ -4459,6 +4753,7 @@ function bindDashboardActionButtons($wrap, frm, data){
       },
     });
     d.fields_dict.help_html.$wrapper.html(`
+      ${summaryHtml}
       <div style="padding:10px;border:1px solid #dbeafe;border-radius:8px;background:#eff6ff;color:#1d4ed8;font-size:12px;">
         ${__("Required for Production Plan: Company, Posting Date, and item rows with Item, BOM, Planned Qty, UOM, and Planned Start.")}
       </div>
@@ -4478,11 +4773,24 @@ function bindDashboardActionButtons($wrap, frm, data){
       d.fields_dict.po_items.grid.refresh();
     });
     d.show();
+    const syncProductionPlanWarehouses = async () => {
+      const company = d.get_value("company") || seed.company || frm.doc.company || "";
+      const abbr = await fetchCompanyAbbr(company);
+      d.set_value("default_fg_warehouse", getDefaultWarehouse("target", company, abbr));
+    };
+    if (d.fields_dict.company && d.fields_dict.company.$input) {
+      d.fields_dict.company.$input.off("change.otr_pp_wh").on("change.otr_pp_wh", () => {
+        void syncProductionPlanWarehouses();
+      });
+    }
+    void syncProductionPlanWarehouses();
     d.fields_dict.load_sales_order_items.$input.trigger("click");
   };
 
   const openWorkOrderCreator = (seed) => {
     const rows = [];
+    const selectedItem = String(seed.item_code || "").trim();
+    const summaryHtml = dailyOperationItemSummaryHtml(dailyOperationSummary, selectedItem, { show_item_totals_table: false });
     const d = new frappe.ui.Dialog({
       title: __("Create Work Order"),
       size: "extra-large",
@@ -4497,13 +4805,13 @@ function bindDashboardActionButtons($wrap, frm, data){
         { fieldtype: "Section Break" },
         { fieldtype: "Datetime", fieldname: "planned_start_date", label: __("Planned Start Date"), default: frappe.datetime.now_datetime(), reqd: 1 },
         { fieldtype: "Column Break" },
-        { fieldtype: "Link", fieldname: "source_warehouse", label: __("Source Warehouse"), options: "Warehouse", default: frm.doc.set_warehouse || "" },
+        { fieldtype: "Link", fieldname: "source_warehouse", label: __("Source Warehouse"), options: "Warehouse", default: getDefaultWarehouse("source", seed.company || frm.doc.company || "") },
         { fieldtype: "Column Break" },
-        { fieldtype: "Link", fieldname: "wip_warehouse", label: __("WIP Warehouse"), options: "Warehouse" },
+        { fieldtype: "Link", fieldname: "wip_warehouse", label: __("WIP Warehouse"), options: "Warehouse", default: getDefaultWarehouse("wip", seed.company || frm.doc.company || "") },
         { fieldtype: "Section Break" },
-        { fieldtype: "Link", fieldname: "fg_warehouse", label: __("Target Warehouse"), options: "Warehouse", default: frm.doc.set_warehouse || "", reqd: 1 },
+        { fieldtype: "Link", fieldname: "fg_warehouse", label: __("Target Warehouse"), options: "Warehouse", default: getDefaultWarehouse("target", seed.company || frm.doc.company || ""), reqd: 1 },
         { fieldtype: "Column Break" },
-        { fieldtype: "Link", fieldname: "scrap_warehouse", label: __("Scrap Warehouse"), options: "Warehouse" },
+        { fieldtype: "Link", fieldname: "scrap_warehouse", label: __("Scrap Warehouse"), options: "Warehouse", default: getDefaultWarehouse("scrap", seed.company || frm.doc.company || "") },
         { fieldtype: "Column Break" },
         { fieldtype: "Check", fieldname: "skip_transfer", label: __("Skip Material Transfer to WIP"), default: 0 },
         { fieldtype: "Section Break" },
@@ -4561,6 +4869,7 @@ function bindDashboardActionButtons($wrap, frm, data){
       },
     });
     d.fields_dict.help_html.$wrapper.html(`
+      ${summaryHtml}
       <div style="padding:10px;border:1px solid #ede9fe;border-radius:8px;background:#f5f3ff;color:#5b21b6;font-size:12px;">
         ${__("Required for Work Order: Company, Planned Start Date, Target Warehouse, and item rows with Item, BOM, and Qty.")}
       </div>
@@ -4577,6 +4886,20 @@ function bindDashboardActionButtons($wrap, frm, data){
       d.fields_dict.wo_items.grid.refresh();
     });
     d.show();
+    const syncWorkOrderWarehouses = async () => {
+      const company = d.get_value("company") || seed.company || frm.doc.company || "";
+      const abbr = await fetchCompanyAbbr(company);
+      d.set_value("source_warehouse", getDefaultWarehouse("source", company, abbr));
+      d.set_value("wip_warehouse", getDefaultWarehouse("wip", company, abbr));
+      d.set_value("fg_warehouse", getDefaultWarehouse("target", company, abbr));
+      d.set_value("scrap_warehouse", getDefaultWarehouse("scrap", company, abbr));
+    };
+    if (d.fields_dict.company && d.fields_dict.company.$input) {
+      d.fields_dict.company.$input.off("change.otr_wo_wh").on("change.otr_wo_wh", () => {
+        void syncWorkOrderWarehouses();
+      });
+    }
+    void syncWorkOrderWarehouses();
     d.fields_dict.load_sales_order_items.$input.trigger("click");
   };
 
@@ -4592,9 +4915,9 @@ function bindDashboardActionButtons($wrap, frm, data){
         { fieldtype: "Column Break" },
         { fieldtype: "Date", fieldname: "posting_date", label: __("Posting Date"), default: frappe.datetime.now_date(), reqd: 1 },
         { fieldtype: "Section Break" },
-        { fieldtype: "Link", fieldname: "source_warehouse", label: __("Source Warehouse"), options: "Warehouse", default: frm.doc.set_warehouse || "" },
+        { fieldtype: "Link", fieldname: "source_warehouse", label: __("Source Warehouse"), options: "Warehouse", default: getDefaultWarehouse("source", seed.company || frm.doc.company || "") },
         { fieldtype: "Column Break" },
-        { fieldtype: "Link", fieldname: "target_warehouse", label: __("Target Warehouse"), options: "Warehouse", default: frm.doc.set_warehouse || "" },
+        { fieldtype: "Link", fieldname: "target_warehouse", label: __("Target Warehouse"), options: "Warehouse", default: getDefaultWarehouse("target", seed.company || frm.doc.company || "") },
         { fieldtype: "Column Break" },
         { fieldtype: "Check", fieldname: "submit_after_create", label: __("Submit after create"), default: 0 },
       ],
@@ -4633,6 +4956,10 @@ function bindDashboardActionButtons($wrap, frm, data){
       },
     });
     d.show();
+    const company = seed.company || frm.doc.company || "";
+    const abbr = await fetchCompanyAbbr(company);
+    d.set_value("source_warehouse", getDefaultWarehouse("source", company, abbr));
+    d.set_value("target_warehouse", getDefaultWarehouse("target", company, abbr));
   };
 
   const filterMappedItemsBySeed = (doc, seed) => {
@@ -5052,7 +5379,7 @@ function bindDashboardActionButtons($wrap, frm, data){
         const action = $(this).attr("data-manager-jc-action");
         const name = $(this).attr("data-name") || "";
         dialog.hide();
-        openJobCardControlDialog(action, name, () => {
+        openJobCardControlDialog(action, name, snapshot.itemCode || "", () => {
           openExistingDocsDialog(snapshot.seed);
         });
       });
@@ -5090,6 +5417,106 @@ function bindDashboardActionButtons($wrap, frm, data){
       dialog.fields_dict.item_code.$input.off("change").on("change", renderManager);
     }
     renderManager();
+  };
+
+  const openJobCardCenter = (selectedItem) => {
+    const itemCode = String(selectedItem || primaryItem || "").trim();
+    const seed = buildSeedForItem(itemCode);
+    const itemLinks = getItemLinks(itemCode) || {};
+    const jobCards = (itemLinks.job_cards || []).filter((row) => !_isCancelledLikeStatus(row.status));
+
+    if (!jobCards.length) {
+      frappe.show_alert({ message: __("No Job Cards found for this item. Opening Manage Existing Docs."), indicator: "orange" }, 5);
+      openExistingDocsDialog(seed);
+      return;
+    }
+
+    const dialog = new frappe.ui.Dialog({
+      title: __("Job Card Control"),
+      size: "extra-large",
+      fields: [{ fieldtype: "HTML", fieldname: "body_html" }],
+    });
+
+    const render = () => {
+      const rows = jobCards.map((row) => {
+        const status = normalizeStatus(row.status);
+        const canStart = status === "open" || status === "not started";
+        const canPause = status === "work in progress";
+        const canComplete = status === "work in progress";
+        return `
+          <tr>
+            <td>${docLink("Job Card", row.name || "")}</td>
+            <td>${badge(row.status || "—")}</td>
+            <td>${row.work_order ? docLink("Work Order", row.work_order) : "—"}</td>
+            <td>${esc(row.operation || "—")}</td>
+            <td>${esc(row.workstation || "—")}</td>
+            <td style="text-align:right;">${_n0(row.for_quantity || 0)}</td>
+            <td style="text-align:right;">${_n0(row.total_completed_qty || 0)}</td>
+            <td style="white-space:nowrap;">
+              <button class="btn btn-xs btn-default" data-jcc-action="open" data-job-card="${esc(row.name || "")}">${__("Open")}</button>
+              <button class="btn btn-xs btn-secondary" data-jcc-action="manage" data-job-card="${esc(row.name || "")}">${__("Manage")}</button>
+              ${canStart ? `<button class="btn btn-xs btn-success" data-jcc-action="start" data-job-card="${esc(row.name || "")}">${__("Start")}</button>` : ""}
+              ${canPause ? `<button class="btn btn-xs btn-warning" data-jcc-action="pause" data-job-card="${esc(row.name || "")}">${__("Pause")}</button>` : ""}
+              ${canComplete ? `<button class="btn btn-xs btn-primary" data-jcc-action="complete" data-job-card="${esc(row.name || "")}">${__("Complete")}</button>` : ""}
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+      dialog.fields_dict.body_html.$wrapper.html(`
+        <div style="padding:10px;border:1px solid #dbeafe;border-radius:10px;background:#eff6ff;color:#1e3a8a;font-size:12px;margin-bottom:10px;">
+          <b>${__("Sales Order")}:</b> ${esc(frm.doc.name || "")} &nbsp; | &nbsp;
+          <b>${__("Item")}:</b> ${esc(itemCode || __("Multiple"))}
+        </div>
+        ${dailyOperationItemSummaryHtml(dailyOperationSummary, itemCode, { show_item_totals_table: false })}
+        <div class="table-responsive">
+          <table class="table table-bordered so-table" style="margin:0;">
+            <thead>
+              <tr>
+                <th>${__("Job Card")}</th>
+                <th>${__("Status")}</th>
+                <th>${__("Work Order")}</th>
+                <th>${__("Operation")}</th>
+                <th>${__("Workstation")}</th>
+                <th style="text-align:right;">${__("Qty")}</th>
+                <th style="text-align:right;">${__("Completed")}</th>
+                <th>${__("Actions")}</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `);
+
+      const $body = dialog.fields_dict.body_html.$wrapper;
+      $body.find("[data-jcc-action]").off("click").on("click", function(e) {
+        e.preventDefault();
+        const action = ($(this).attr("data-jcc-action") || "").trim();
+        const jobCard = ($(this).attr("data-job-card") || "").trim();
+        if (!jobCard) return;
+
+        if (action === "open") {
+          window.open(`/app/job-card/${encodeURIComponent(jobCard)}`, "_blank");
+          return;
+        }
+
+        if (action === "manage") {
+          dialog.hide();
+          openExistingDocsDialog({ ...seed, job_card: jobCard });
+          return;
+        }
+
+        if (action === "start" || action === "pause" || action === "complete") {
+          dialog.hide();
+          openJobCardControlDialog(action, jobCard, itemCode, () => {
+            openJobCardCenter(itemCode);
+          });
+        }
+      });
+    };
+
+    dialog.show();
+    render();
   };
 
   const openCurrentDocuments = (seed) => {
@@ -5161,7 +5588,7 @@ function bindDashboardActionButtons($wrap, frm, data){
       if (a === "so") openSalesOrderCreator(seed);
       else if (a === "pp") openProductionPlanCreator(seed);
       else if (a === "wo") openWorkOrderCreator(seed);
-      else if (a === "jc") openExistingDocsDialog(seed);
+      else if (a === "jc") openJobCardCenter(selectedItem);
       else if (a === "manage") openExistingDocsDialog(seed);
       else if (a === "mt") openStockEntryCreator(seed, "Material Transfer for Manufacture");
       else if (a === "mfg") openStockEntryCreator(seed, "Manufacture");
@@ -5200,7 +5627,7 @@ function bindDashboardActionButtons($wrap, frm, data){
       }
       return openWorkOrderCreator(seed);
     }
-    if (action === "job_card" || action === "jc") return openExistingDocsDialog(seed);
+    if (action === "job_card" || action === "jc") return openJobCardCenter(seed.item_code || selectedItem || primaryItem);
     if (action === "manage_docs" || action === "manage" || action === "view") return openExistingDocsDialog(seed);
     if (action === "create_material_transfer" || action === "mt") {
       const activeWorkOrder = getActiveRows(itemLinks.work_orders || [])[0];
@@ -5268,7 +5695,7 @@ function bindDashboardActionButtons($wrap, frm, data){
       return;
     }
     if (action === "start" || action === "pause" || action === "complete") {
-      openJobCardControlDialog(action === "pause" ? "pause" : action, jobCard);
+      openJobCardControlDialog(action === "pause" ? "pause" : action, jobCard, item || "");
     }
   });
 }
@@ -5602,4 +6029,3 @@ function fill_bank_fields(frm, bank_account) {
     frm.set_value("custom_iban", d.iban || "");
   });
 }
-
