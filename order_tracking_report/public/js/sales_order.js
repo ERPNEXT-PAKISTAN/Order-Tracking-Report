@@ -2663,19 +2663,16 @@ function _money0(v) {
   try { return format_currency(_int(v || 0), null, 0); } catch (e) { return _n0(v); }
 }
 function getCompanyAbbr(company) {
-  if (!company) return "";
-  if (COMPANY_ABBR_CACHE[company]) return COMPANY_ABBR_CACHE[company];
-  // Try to use abbreviation pattern (e.g., "Test Company Pvt Ltd" -> "TCPL")
-  const abbr = (company.match(/\b([A-Z])[A-Z]+/g) || []).join("") || company.split(" ").map(w => w[0]).join("");
-  COMPANY_ABBR_CACHE[company] = abbr;
-  return COMPANY_ABBR_CACHE[company];
+  const key = String(company || "").trim();
+  if (!key) return "";
+  return COMPANY_ABBR_CACHE[key] || "";
 }
 
 const COMPANY_ABBR_CACHE = {};
 const DEFAULT_WAREHOUSE_LABELS = {
   source: "Store",
   wip: "Work In Progress",
-  target: "Finished Goods",
+  target: "Finished Good",
   scrap: "Work In Progress"
 };
 
@@ -2684,13 +2681,12 @@ function fetchCompanyAbbr(company) {
   if (!key) return Promise.resolve("");
   if (COMPANY_ABBR_CACHE[key]) return Promise.resolve(COMPANY_ABBR_CACHE[key]);
   return frappe.db.get_value("Company", key, "abbr").then((r) => {
-    const abbr = ((r && r.message && r.message.abbr) || "").trim() || getCompanyAbbr(key);
+    const abbr = ((r && r.message && r.message.abbr) || "").trim();
     COMPANY_ABBR_CACHE[key] = abbr;
     return abbr;
   }).catch(() => {
-    const fallback = getCompanyAbbr(key);
-    COMPANY_ABBR_CACHE[key] = fallback;
-    return fallback;
+    COMPANY_ABBR_CACHE[key] = "";
+    return "";
   });
 }
 
@@ -2796,20 +2792,18 @@ function open_po_item_data_entry(frm, prefill) {
       disabled: 0,
     },
   });
-  // Set default value on dialog open
-  dialog.on('show', () => {
-    const fallbackWarehouse = resolveDefaultWarehouse();
-    if (!dialog.get_value('warehouse')) {
-      dialog.set_value('warehouse', fallbackWarehouse);
+  // Set default value without relying on Dialog.on (not available in some builds)
+  const fallbackWarehouse = resolveDefaultWarehouse();
+  if (!dialog.get_value("warehouse")) {
+    dialog.set_value("warehouse", fallbackWarehouse);
+  }
+  const company = frm.doc.company || "";
+  void fetchCompanyAbbr(company).then((abbr) => {
+    const exactWarehouse = getDefaultWarehouse("source", company, abbr);
+    const currentWarehouse = dialog.get_value("warehouse") || "";
+    if (!currentWarehouse || currentWarehouse === fallbackWarehouse) {
+      dialog.set_value("warehouse", exactWarehouse);
     }
-    const company = frm.doc.company || "";
-    void fetchCompanyAbbr(company).then((abbr) => {
-      const exactWarehouse = getDefaultWarehouse("source", company, abbr);
-      const currentWarehouse = dialog.get_value("warehouse") || "";
-      if (!currentWarehouse || currentWarehouse === fallbackWarehouse) {
-        dialog.set_value("warehouse", exactWarehouse);
-      }
-    });
   });
 
   dialog.fields_dict.item_group.get_query = () => {
@@ -5718,27 +5712,34 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
   });
 
   const askQtyMode = () => new Promise((resolve) => {
+    let resolved = false;
+    const done = (value) => {
+      if (resolved) return;
+      resolved = true;
+      resolve(value);
+    };
     const d = new frappe.ui.Dialog({
       title: __("Create PO Quantity Source"),
       fields: [{ fieldtype: "HTML", fieldname: "body" }],
       primary_action_label: __("Cancel"),
       primary_action: () => {
+        done(null);
         d.hide();
-        resolve(null);
       },
     });
     d.fields_dict.body.$wrapper.html(`
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
-        <button class="btn btn-primary" data-ms-choose-mode="required_plus_wastage">${__("Required + Wastage on BOM")}</button>
-        <button class="btn btn-warning" data-ms-choose-mode="shortage_plus_wastage">${__("Shortage + Wastage on BOM")}</button>
+        <button type="button" class="btn btn-primary" data-ms-choose-mode="required_plus_wastage">${__("Required + Wastage on BOM")}</button>
+        <button type="button" class="btn btn-warning" data-ms-choose-mode="shortage_plus_wastage">${__("Shortage + Wastage on BOM")}</button>
       </div>
     `);
-    d.fields_dict.body.$wrapper.find("[data-ms-choose-mode]").on("click", function(e){
+    d.$wrapper.off("click.otr_ms_mode").on("click.otr_ms_mode", "[data-ms-choose-mode]", function(e){
       e.preventDefault();
       const mode = ($(this).attr("data-ms-choose-mode") || "").trim();
+      done(mode || null);
       d.hide();
-      resolve(mode || null);
     });
+    d.onhide = () => done(null);
     d.show();
   });
 
@@ -5816,7 +5817,7 @@ function bindMaterialShortageCreatePo($wrap, frm, data){
     const group = ($(this).attr("data-group") || "").trim();
     const mode = await askQtyMode();
     if (!mode) return;
-    const defaultWarehouse = DEFAULT_MATERIAL_SHORTAGE_GROUP_WAREHOUSE;
+    const defaultWarehouse = getDefaultWarehouse("source", frm.doc.company || "");
     if (!group) return;
     const rows = (data.material_shortage || []).filter((r) => (r.item_group || "") === group && (r.item_code || "").trim());
     if (!rows.length) {
