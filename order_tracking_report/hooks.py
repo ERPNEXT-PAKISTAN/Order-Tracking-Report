@@ -39,6 +39,7 @@ fixtures = [
 				"Per Piece Query Report Simple",
 				"Per Piece Salary Report",
 				"Purchase Order Status Report",
+				"Sales Order Status Report",
 				"Stock Report",
 			],
 		]],

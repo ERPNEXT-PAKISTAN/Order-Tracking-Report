@@ -1,3 +1,5 @@
+import re
+
 import frappe
 
 from order_tracking_report.order_tracking_report.page.daily_operation_report.daily_operation_report import get_daily_operation_page_data
@@ -2969,6 +2971,32 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             })
         return out
     
+    def get_sales_order_expenses(so):
+        if not so:
+            return []
+        rows = safe_sql(
+            "SELECT "
+            "ecd.expense_date AS expense_date, "
+            "ecd.expense_type AS expense_claim_type, "
+            "ecd.description AS description, "
+            "IFNULL(ecd.amount, 0) AS amount, "
+            "ec.name AS expense_claim, "
+            "ec.status AS expense_claim_status "
+            "FROM `tabExpense Claim` ec "
+            "JOIN `tabExpense Claim Detail` ecd ON ecd.parent = ec.name "
+            "WHERE ec.sales_order = %(so)s "
+            "AND ec.docstatus != 2 "
+            "ORDER BY ecd.expense_date DESC, ec.modified DESC, ecd.idx ASC",
+            {"so": so},
+        )
+        for row in rows:
+            raw = str(row.get("description") or "")
+            clean = re.sub(r"(?is)<[^>]+>", " ", raw)
+            clean = re.sub(r"\s+", " ", clean).strip()
+            row["description"] = clean
+        return rows
+
+
     # ---------------------------------------------------------
     # MAIN
     # ---------------------------------------------------------
@@ -3009,7 +3037,8 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             "purchase_flow_rows": [],
             "labour_cost_employee_item_wise": [],
             "labour_cost_summary": {"total_qty": 0, "total_cost": 0},
-            "po_item_group_summary": []
+            "po_item_group_summary": [],
+            "sales_order_expenses": [],
         }
     
     else:
@@ -3054,7 +3083,8 @@ def run(sales_order=None, action=None, doctype=None, docname=None, stock_locatio
             "purchase_flow_rows": get_purchase_flow_rows(sales_order),
             "labour_cost_employee_item_wise": labour_data.get("rows") or [],
             "labour_cost_summary": labour_data.get("summary") or {},
-            "po_item_group_summary": po_item_group_summary
+            "po_item_group_summary": po_item_group_summary,
+            "sales_order_expenses": get_sales_order_expenses(sales_order),
         }
 
     return frappe.response.get("message")

@@ -478,12 +478,14 @@ def _merge_payloads(payloads):
     labour_rows = []
     material_shortage = []
     purchase_flow_rows = []
+    sales_order_expenses = []
 
     for payload in payloads:
         bom_tree.extend(payload.get("bom_tree") or [])
         labour_rows.extend(payload.get("labour_cost_employee_item_wise") or [])
         material_shortage.extend(payload.get("material_shortage") or [])
         purchase_flow_rows.extend(payload.get("purchase_flow_rows") or [])
+        sales_order_expenses.extend(payload.get("sales_order_expenses") or [])
 
     return {
         "profit_by_item": profit_rows,
@@ -499,6 +501,7 @@ def _merge_payloads(payloads):
         "material_shortage": material_shortage,
         "labour_cost_employee_item_wise": labour_rows,
         "purchase_flow_rows": purchase_flow_rows,
+        "sales_order_expenses": sales_order_expenses,
     }
 
 
@@ -557,14 +560,16 @@ def _build_item_group_summary(profit_rows):
     return rows
 
 
-def _build_statement_rows(selected_profit_summary, labour_summary, po_item_group_summary):
+def _build_statement_rows(selected_profit_summary, labour_summary, po_item_group_summary, sales_order_expenses=None):
     sales_amount = frappe.utils.flt(selected_profit_summary.get("sales_amount"))
     material_cost = frappe.utils.flt(selected_profit_summary.get("estimated_cost"))
     gross_profit = sales_amount - material_cost
     labour_cost = frappe.utils.flt(labour_summary.get("total_cost"))
     procurement_amount = _sum_po_amount(po_item_group_summary)
+    expense_claim_amount = _sum_sales_order_expenses(sales_order_expenses)
     net_profit_after_labour = gross_profit - labour_cost
     net_profit_after_procurement = net_profit_after_labour - procurement_amount
+    net_profit_after_expenses = net_profit_after_procurement - expense_claim_amount
 
     return [
         {"label": "Sales Amount", "amount": sales_amount},
@@ -574,6 +579,8 @@ def _build_statement_rows(selected_profit_summary, labour_summary, po_item_group
         {"label": "Profit After Labour", "amount": net_profit_after_labour},
         {"label": "Procurement Amount", "amount": procurement_amount},
         {"label": "Net Profit After Procurement", "amount": net_profit_after_procurement},
+        {"label": "Expense Claims", "amount": expense_claim_amount},
+        {"label": "Net Profit After Expenses", "amount": net_profit_after_expenses},
     ]
 
 
@@ -995,6 +1002,10 @@ def _sum_po_amount(po_item_group_summary):
     return sum(frappe.utils.flt(row.get("po_amount")) for row in po_item_group_summary or [])
 
 
+def _sum_sales_order_expenses(sales_order_expenses):
+    return sum(frappe.utils.flt(row.get("amount")) for row in sales_order_expenses or [])
+
+
 def _get_selected_invoice_details(fulfillment_rows, delivery_note):
     invoice_names = []
     for row in fulfillment_rows or []:
@@ -1015,17 +1026,19 @@ def _get_selected_invoice_details(fulfillment_rows, delivery_note):
     return out
 
 
-def _build_related_expenses(selected_profit_summary, labour_summary, po_item_group_summary):
+def _build_related_expenses(selected_profit_summary, labour_summary, po_item_group_summary, sales_order_expenses=None):
     expenses = [
         {
             "label": "Estimated Material Cost",
             "amount": frappe.utils.flt(selected_profit_summary.get("estimated_cost")),
             "source": "Default BOM",
+            "entry_no": "",
         },
         {
             "label": "Labour Cost",
             "amount": frappe.utils.flt(labour_summary.get("total_cost")),
             "source": "Job Cards",
+            "entry_no": "",
         },
     ]
     po_amount = _sum_po_amount(po_item_group_summary)
@@ -1035,6 +1048,26 @@ def _build_related_expenses(selected_profit_summary, labour_summary, po_item_gro
                 "label": "Procurement Amount",
                 "amount": po_amount,
                 "source": "Purchase Orders",
+                "entry_no": "",
+            }
+        )
+    expense_claim_amount = _sum_sales_order_expenses(sales_order_expenses)
+    if expense_claim_amount:
+        for row in sales_order_expenses or []:
+            expenses.append(
+                {
+                    "label": (row.get("expense_claim_type") or "Expense Claim").strip(),
+                    "amount": frappe.utils.flt(row.get("amount")),
+                    "source": (row.get("description") or "").strip() or "Expense Claim",
+                    "entry_no": (row.get("expense_claim") or "").strip(),
+                }
+            )
+        expenses.append(
+            {
+                "label": "Expense Claims",
+                "amount": expense_claim_amount,
+                "source": "Expense Claim",
+                "entry_no": "",
             }
         )
     return expenses
@@ -1218,11 +1251,13 @@ def get_sales_order_pl_by_order(sales_order=None, delivery_note=None):
             selected_profit_summary,
             scaled_labour.get("summary") or {},
             po_item_group_summary,
+            base_payload.get("sales_order_expenses") or [],
         )
         statement_rows = _build_statement_rows(
             selected_profit_summary,
             scaled_labour.get("summary") or {},
             po_item_group_summary,
+            base_payload.get("sales_order_expenses") or [],
         )
         item_group_summary = _build_item_group_summary(selected_profit_rows)
         hierarchical_statement_rows = _build_hierarchical_statement_rows(
@@ -1251,6 +1286,7 @@ def get_sales_order_pl_by_order(sales_order=None, delivery_note=None):
             "po_item_group_summary": po_item_group_summary,
             "purchase_flow_rows": base_payload.get("purchase_flow_rows") or [],
             "sales_fulfillment_hierarchy": fulfillment_rows,
+            "sales_order_expenses": base_payload.get("sales_order_expenses") or [],
             "related_expenses": related_expenses,
             "statement_rows": statement_rows,
             "item_group_summary": item_group_summary,
@@ -1386,11 +1422,13 @@ def get_sales_order_pl_by_wo(sales_order=None, delivery_note=None):
             selected_profit_summary_wo,
             scaled_labour.get("summary") or {},
             po_item_group_summary,
+            base_payload.get("sales_order_expenses") or [],
         )
         statement_rows = _build_statement_rows(
             selected_profit_summary_wo,
             scaled_labour.get("summary") or {},
             po_item_group_summary,
+            base_payload.get("sales_order_expenses") or [],
         )
         item_group_summary = _build_item_group_summary(selected_profit_rows_wo)
         hierarchical_statement_rows = _build_hierarchical_statement_rows(
@@ -1419,6 +1457,7 @@ def get_sales_order_pl_by_wo(sales_order=None, delivery_note=None):
             "po_item_group_summary": po_item_group_summary,
             "purchase_flow_rows": base_payload.get("purchase_flow_rows") or [],
             "sales_fulfillment_hierarchy": fulfillment_rows,
+            "sales_order_expenses": base_payload.get("sales_order_expenses") or [],
             "related_expenses": related_expenses,
             "statement_rows": statement_rows,
             "item_group_summary": item_group_summary,
@@ -2028,3 +2067,315 @@ def force_sync_per_piece_status():
     """)
     frappe.db.commit()
     return {"ok": True, "rows_checked": len(rows), "rows_updated": updated}
+
+
+def _status_counts_label(rows):
+    counts = {}
+    for row in rows or []:
+        status = (row.get("status") or "Unknown").strip() or "Unknown"
+        counts[status] = counts.get(status, 0) + 1
+    if not counts:
+        return "-"
+    ordered = sorted(counts.items(), key=lambda kv: kv[0].lower())
+    return ", ".join([f"{name}: {qty}" for name, qty in ordered])
+
+
+def _num(v):
+    try:
+        return float(v or 0)
+    except Exception:
+        return 0.0
+
+
+@frappe.whitelist()
+def get_sales_order_status_board(
+    company=None,
+    customer=None,
+    sales_order=None,
+    from_date=None,
+    to_date=None,
+    so_status=None,
+):
+    conditions = ["so.docstatus < 2", "LOWER(IFNULL(so.status, '')) NOT IN ('cancelled', 'canceled')"]
+    values = {}
+
+    if company:
+        conditions.append("so.company = %(company)s")
+        values["company"] = company
+    if customer:
+        conditions.append("so.customer = %(customer)s")
+        values["customer"] = customer
+    if sales_order:
+        conditions.append("so.name = %(sales_order)s")
+        values["sales_order"] = sales_order
+    if from_date:
+        conditions.append("so.transaction_date >= %(from_date)s")
+        values["from_date"] = from_date
+    if to_date:
+        conditions.append("so.transaction_date <= %(to_date)s")
+        values["to_date"] = to_date
+    if so_status and str(so_status).strip().lower() not in {"cancelled", "canceled"}:
+        conditions.append("so.status = %(so_status)s")
+        values["so_status"] = so_status
+
+    so_rows = frappe.db.sql(
+        f"""
+        SELECT
+            so.name AS sales_order,
+            so.transaction_date AS date,
+            so.customer,
+            so.status AS so_status,
+            IFNULL(so.delivery_status, '') AS delivery_status,
+            IFNULL(so.billing_status, '') AS billing_status
+        FROM `tabSales Order` so
+        WHERE {" AND ".join(conditions)}
+        ORDER BY so.transaction_date DESC, so.name DESC
+        """,
+        values,
+        as_dict=True,
+    )
+
+    if not so_rows:
+        return {"rows": []}
+
+    so_names = [r.get("sales_order") for r in so_rows if r.get("sales_order")]
+
+    ordered_qty_rows = frappe.db.sql(
+        """
+        SELECT parent AS sales_order, item_code, SUM(IFNULL(qty, 0)) AS ordered_qty
+        FROM `tabSales Order Item`
+        WHERE parent IN %(so_names)s
+        GROUP BY parent, item_code
+        """,
+        {"so_names": tuple(so_names)},
+        as_dict=True,
+    )
+    ordered_qty_map = {}
+    for row in ordered_qty_rows:
+        ordered_qty_map[(row.get("sales_order"), row.get("item_code"))] = _num(row.get("ordered_qty"))
+
+    pp_status_rows = frappe.db.sql(
+        """
+        SELECT pps.sales_order, pp.name, IFNULL(pp.status, 'Draft') AS status
+        FROM `tabProduction Plan Sales Order` pps
+        JOIN `tabProduction Plan` pp ON pp.name = pps.parent
+        WHERE pps.sales_order IN %(so_names)s
+            AND pp.docstatus != 2
+            AND LOWER(IFNULL(pp.status, '')) NOT IN ('cancelled', 'canceled')
+        ORDER BY pp.modified DESC
+        """,
+        {"so_names": tuple(so_names)},
+        as_dict=True,
+    )
+
+    pp_item_rows = frappe.db.sql(
+        """
+        SELECT
+            ppi.sales_order,
+            ppi.item_code AS item,
+            SUM(IFNULL(ppi.planned_qty, 0)) AS planned_qty,
+            SUM(IFNULL(ppi.produced_qty, 0)) AS produced_qty
+        FROM `tabProduction Plan Item` ppi
+        JOIN `tabProduction Plan` pp ON pp.name = ppi.parent
+        WHERE ppi.sales_order IN %(so_names)s
+            AND pp.docstatus != 2
+            AND LOWER(IFNULL(pp.status, '')) NOT IN ('cancelled', 'canceled')
+        GROUP BY ppi.sales_order, ppi.item_code
+        ORDER BY ppi.sales_order, ppi.item_code
+        """,
+        {"so_names": tuple(so_names)},
+        as_dict=True,
+    )
+
+    wo_rows = frappe.db.sql(
+        """
+        SELECT
+            wo.sales_order,
+            wo.name,
+            IFNULL(wo.status, 'Draft') AS status,
+            IFNULL(wo.production_item, '') AS item,
+            IFNULL(wo.qty, 0) AS qty,
+            IFNULL(wo.material_transferred_for_manufacturing, 0) AS material_transferred_for_manufacturing,
+            IFNULL(wo.produced_qty, 0) AS produced_qty,
+            IFNULL(wo.process_loss_qty, 0) AS process_loss_qty
+        FROM `tabWork Order` wo
+        WHERE wo.sales_order IN %(so_names)s
+            AND wo.docstatus != 2
+            AND LOWER(IFNULL(wo.status, '')) NOT IN ('cancelled', 'canceled')
+        ORDER BY wo.modified DESC
+        """,
+        {"so_names": tuple(so_names)},
+        as_dict=True,
+    )
+
+    wo_names = [r.get("name") for r in wo_rows if r.get("name")]
+    jc_rows = []
+    se_rows = []
+    if wo_names:
+        jc_rows = frappe.db.sql(
+            """
+            SELECT
+                wo.sales_order,
+                jc.name,
+                IFNULL(jc.status, 'Draft') AS status,
+                IFNULL(wo.production_item, '') AS item,
+                IFNULL(jctl.employee, '') AS employee,
+                IFNULL(jc.operation, '') AS operation,
+                IFNULL(jc.for_quantity, 0) AS for_quantity,
+                IFNULL(jc.total_completed_qty, 0) AS total_completed_qty,
+                IFNULL(jc.process_loss_qty, 0) AS process_loss_qty
+            FROM `tabJob Card` jc
+            JOIN `tabWork Order` wo ON wo.name = jc.work_order
+            LEFT JOIN (
+                SELECT parent, MIN(employee) AS employee
+                FROM `tabJob Card Time Log`
+                WHERE IFNULL(employee, '') != ''
+                GROUP BY parent
+            ) jctl ON jctl.parent = jc.name
+            WHERE jc.work_order IN %(wo_names)s
+                AND jc.docstatus != 2
+                AND wo.docstatus != 2
+                AND LOWER(IFNULL(jc.status, '')) NOT IN ('cancelled', 'canceled')
+                AND LOWER(IFNULL(wo.status, '')) NOT IN ('cancelled', 'canceled')
+            ORDER BY jc.modified DESC
+            """,
+            {"wo_names": tuple(wo_names)},
+            as_dict=True,
+        )
+
+        se_rows = frappe.db.sql(
+            """
+            SELECT
+                wo.sales_order,
+                se.name,
+                se.work_order,
+                se.docstatus,
+                IFNULL(se.purpose, '') AS stock_entry_type,
+                IFNULL(se.fg_completed_qty, 0) AS fg_completed_qty,
+                IFNULL(se.bom_no, '') AS bom_no
+            FROM `tabStock Entry` se
+            JOIN `tabWork Order` wo ON wo.name = se.work_order
+            WHERE se.work_order IN %(wo_names)s
+                AND se.docstatus != 2
+                AND wo.docstatus != 2
+                AND LOWER(IFNULL(wo.status, '')) NOT IN ('cancelled', 'canceled')
+            ORDER BY se.modified DESC
+            """,
+            {"wo_names": tuple(wo_names)},
+            as_dict=True,
+        )
+
+    pp_status_map = {}
+    for row in pp_status_rows:
+        pp_status_map.setdefault(row.get("sales_order"), []).append({"name": row.get("name"), "status": row.get("status")})
+
+    pp_item_map = {}
+    for row in pp_item_rows:
+        so_name = row.get("sales_order")
+        item_code = row.get("item") or ""
+        planned = _num(row.get("planned_qty"))
+        produced = _num(row.get("produced_qty"))
+        pp_item_map.setdefault(so_name, []).append(
+            {
+                "item": item_code,
+                "planned_qty": planned,
+                "produced_qty": produced,
+                "pending_qty": max(planned - produced, 0),
+                "ordered_qty": _num(ordered_qty_map.get((so_name, item_code))),
+            }
+        )
+
+    wo_map = {}
+    for row in wo_rows:
+        wo_map.setdefault(row.get("sales_order"), []).append(
+            {
+                "name": row.get("name"),
+                "status": row.get("status"),
+                "item": row.get("item"),
+                "qty": _num(row.get("qty")),
+                "material_transferred_for_manufacturing": _num(row.get("material_transferred_for_manufacturing")),
+                "produced_qty": _num(row.get("produced_qty")),
+                "process_loss_qty": _num(row.get("process_loss_qty")),
+            }
+        )
+
+    jc_map = {}
+    for row in jc_rows:
+        jc_map.setdefault(row.get("sales_order"), []).append(
+            {
+                "name": row.get("name"),
+                "status": row.get("status"),
+                "item": row.get("item"),
+                "employee": row.get("employee"),
+                "operation": row.get("operation"),
+                "for_quantity": _num(row.get("for_quantity")),
+                "total_completed_qty": _num(row.get("total_completed_qty")),
+                "process_loss_qty": _num(row.get("process_loss_qty")),
+            }
+        )
+
+    se_map = {}
+    for row in se_rows:
+        status = "Draft"
+        if int(_num(row.get("docstatus"))) == 1:
+            status = "Submitted"
+        se_map.setdefault(row.get("sales_order"), []).append(
+            {
+                "name": row.get("name"),
+                "status": status,
+                "work_order": row.get("work_order"),
+                "stock_entry_type": row.get("stock_entry_type"),
+                "fg_completed_qty": _num(row.get("fg_completed_qty")),
+                "bom_no": row.get("bom_no"),
+            }
+        )
+
+    rows = []
+    for base in so_rows:
+        so_name = base.get("sales_order")
+        pp_details = pp_item_map.get(so_name) or []
+        wo_details = wo_map.get(so_name) or []
+        jc_details = jc_map.get(so_name) or []
+        se_details = se_map.get(so_name) or []
+        pp_statuses = pp_status_map.get(so_name) or []
+
+        pp_planned = sum(_num(x.get("planned_qty")) for x in pp_details)
+        pp_produced = sum(_num(x.get("produced_qty")) for x in pp_details)
+        wo_qty = sum(_num(x.get("qty")) for x in wo_details)
+        wo_produced = sum(_num(x.get("produced_qty")) for x in wo_details)
+        jc_for_qty = sum(_num(x.get("for_quantity")) for x in jc_details)
+        jc_done = sum(_num(x.get("total_completed_qty")) for x in jc_details)
+
+        pp_pct = (pp_produced * 100.0 / pp_planned) if pp_planned else 0
+        wo_pct = (wo_produced * 100.0 / wo_qty) if wo_qty else 0
+        jc_pct = (jc_done * 100.0 / jc_for_qty) if jc_for_qty else 0
+
+        rows.append(
+            {
+                "sales_order": so_name,
+                "date": base.get("date"),
+                "customer": base.get("customer"),
+                "so_status": base.get("so_status"),
+                "delivery_status": base.get("delivery_status"),
+                "billing_status": base.get("billing_status"),
+                "production_plan_status": f"{len(pp_statuses)} plan(s) | {pp_pct:.1f}%",
+                "work_order_status": f"{len(wo_details)} WO | {wo_pct:.1f}%",
+                "job_card_status": f"{len(jc_details)} JC | {jc_pct:.1f}%",
+                "stock_entry_status": f"{len(se_details)} SE",
+                "wo_completion_pct": round(wo_pct, 1),
+                "production_plan_details": pp_details,
+                "work_order_details": wo_details,
+                "job_card_details": jc_details,
+                "stock_entry_details": se_details,
+                "wo_details": wo_details,
+                "jc_details": jc_details,
+                "production_plans": _status_counts_label(pp_statuses),
+                "work_order_completed": round(wo_produced, 2),
+                "work_order_total": round(wo_qty, 2),
+                "job_card_completed": round(jc_done, 2),
+                "job_card_total": round(jc_for_qty, 2),
+                "stock_entry_count": len(se_details),
+            }
+        )
+
+    return {"rows": rows}

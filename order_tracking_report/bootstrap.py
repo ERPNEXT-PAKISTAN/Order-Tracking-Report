@@ -5,6 +5,8 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 
 def ensure_item_po_setup():
+    ensure_order_tracking_reports()
+    ensure_expense_claim_sales_order_field()
     ensure_wastage_doctype()
     ensure_wastage_doctype_fields()
     remove_legacy_wastage_fields()
@@ -16,6 +18,66 @@ def ensure_item_po_setup():
     ensure_allow_on_submit_for_po_fields()
     ensure_sales_order_po_tab_field_order()
     ensure_sales_order_item_custom_fields()
+
+
+def ensure_expense_claim_sales_order_field():
+    custom_fields = {
+        "Expense Claim": [
+            {
+                "fieldname": "sales_order",
+                "label": "Sales Order",
+                "fieldtype": "Link",
+                "options": "Sales Order",
+                "insert_after": "project",
+                "allow_on_submit": 1,
+            },
+        ]
+    }
+    create_custom_fields(custom_fields, update=True)
+
+
+def ensure_order_tracking_reports():
+    ensure_script_report("Purchase Order Status Report", "Purchase Order")
+    ensure_script_report("Sales Order Status Report", "Sales Order")
+    ensure_script_report("Stock Report", "Stock Ledger Entry")
+
+
+def ensure_script_report(report_name, ref_doctype):
+    report = frappe.db.get_value(
+        "Report",
+        report_name,
+        ["name", "ref_doctype", "report_type", "module", "is_standard"],
+        as_dict=True,
+    )
+
+    if not report:
+        frappe.get_doc(
+            {
+                "doctype": "Report",
+                "name": report_name,
+                "report_name": report_name,
+                "report_type": "Script Report",
+                "is_standard": "Yes",
+                "module": "Order Tracking Report",
+                "ref_doctype": ref_doctype,
+                "prepared_report": 0,
+                "roles": [{"role": "System Manager"}],
+            }
+        ).insert(ignore_permissions=True)
+        return
+
+    updates = {}
+    if report.get("ref_doctype") != ref_doctype:
+        updates["ref_doctype"] = ref_doctype
+    if report.get("report_type") != "Script Report":
+        updates["report_type"] = "Script Report"
+    if report.get("module") != "Order Tracking Report":
+        updates["module"] = "Order Tracking Report"
+    if str(report.get("is_standard") or "") != "Yes":
+        updates["is_standard"] = "Yes"
+
+    if updates:
+        frappe.db.set_value("Report", report_name, updates, update_modified=False)
 
 
 # Ensure custom fields on Sales Order Item for fabric quality, design color, comments
@@ -146,8 +208,10 @@ def ensure_sales_order_live_shortcuts():
     remove_workspace_report_shortcut("Selling", "Daily Operation Report", "Daily Operation Report")
     ensure_selling_daily_operation_report_page_shortcut()
     ensure_selling_daily_production_shortcut()
+    ensure_selling_sales_order_status_report_shortcut()
+    ensure_stock_reports_shortcuts()
     remove_workspace_page_shortcut("Manufacturing", "Existing Manufacturing Documents", "existing-manufacturing-documents")
-    ensure_manufacturing_manage_sales_orders_shortcut()
+    remove_workspace_page_shortcut("Manufacturing", "Manage Sales Orders", "manage-sales-orders")
     ensure_order_tracking_workspace()
     ensure_order_tracking_workspace_shortcuts()
 
@@ -392,12 +456,6 @@ def ensure_manufacturing_sales_order_status_board_shortcut():
     )
 
 
-def ensure_manufacturing_manage_sales_orders_shortcut():
-    _ensure_workspace_page_shortcut(
-        "Manufacturing", "Manage Sales Orders", "manage-sales-orders", "cyan"
-    )
-
-
 def ensure_selling_daily_operation_report_page_shortcut():
     _ensure_workspace_page_shortcut(
         "Selling", "Daily Operation Report", "daily-operation-report", "green"
@@ -407,6 +465,21 @@ def ensure_selling_daily_operation_report_page_shortcut():
 def ensure_selling_daily_production_shortcut():
     _ensure_workspace_shortcut(
         "Selling", "Daily Production", "DocType", "Daily Production", "green"
+    )
+
+
+def ensure_selling_sales_order_status_report_shortcut():
+    _ensure_workspace_report_shortcut(
+        "Selling", "Sales Order Status Report", "Sales Order Status Report", "blue"
+    )
+
+
+def ensure_stock_reports_shortcuts():
+    _ensure_workspace_report_shortcut(
+        "Stock", "Purchase Order Status Report", "Purchase Order Status Report", "yellow"
+    )
+    _ensure_workspace_report_shortcut(
+        "Stock", "Stock Report", "Stock Report", "green"
     )
 
 
@@ -423,7 +496,7 @@ def ensure_order_tracking_workspace():
 def ensure_order_tracking_workspace_shortcuts():
     _ensure_workspace_page_shortcut("Order Tracking", "Sales Order Live", "sales-order-live", "blue")
     _ensure_workspace_page_shortcut("Order Tracking", "Live Work Order", "live-work-order", "green")
-    _ensure_workspace_page_shortcut("Order Tracking", "Manage Sales Orders", "manage-sales-orders", "cyan")
+    remove_workspace_page_shortcut("Order Tracking", "Manage Sales Orders", "manage-sales-orders")
     _ensure_workspace_page_shortcut(
         "Order Tracking", "Sales Order Status Board", "sales-order-status-board", "orange"
     )

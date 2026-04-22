@@ -32,15 +32,15 @@ window.order_tracking_report.SalesOrderStatusBoardPage = class SalesOrderStatusB
 					<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:end;">
 						<div>
 							<label style="display:block;margin-bottom:6px;font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:0.04em;">${__("Company")}</label>
-							<input type="text" data-field="company" class="form-control">
+							<div data-field="company"></div>
 						</div>
 						<div>
 							<label style="display:block;margin-bottom:6px;font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:0.04em;">${__("Customer")}</label>
-							<input type="text" data-field="customer" class="form-control">
+							<div data-field="customer"></div>
 						</div>
 						<div>
 							<label style="display:block;margin-bottom:6px;font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:0.04em;">${__("Sales Order")}</label>
-							<input type="text" data-field="sales_order" class="form-control">
+							<div data-field="sales_order"></div>
 						</div>
 						<div>
 							<label style="display:block;margin-bottom:6px;font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:0.04em;">${__("From Date")}</label>
@@ -59,7 +59,6 @@ window.order_tracking_report.SalesOrderStatusBoardPage = class SalesOrderStatusB
 								<option value="To Bill">${__("To Bill")}</option>
 								<option value="Completed">${__("Completed")}</option>
 								<option value="Closed">${__("Closed")}</option>
-								<option value="Cancelled">${__("Cancelled")}</option>
 							</select>
 						</div>
 					</div>
@@ -73,10 +72,12 @@ window.order_tracking_report.SalesOrderStatusBoardPage = class SalesOrderStatusB
 			</div>
 		`);
 
+		this.linkControls = {
+			company: this.makeLinkControl("company", "Company"),
+			customer: this.makeLinkControl("customer", "Customer"),
+			sales_order: this.makeLinkControl("sales_order", "Sales Order"),
+		};
 		this.fields = {
-			company: this.$root.find('[data-field="company"]'),
-			customer: this.$root.find('[data-field="customer"]'),
-			sales_order: this.$root.find('[data-field="sales_order"]'),
 			from_date: this.$root.find('[data-field="from_date"]'),
 			to_date: this.$root.find('[data-field="to_date"]'),
 			so_status: this.$root.find('[data-field="so_status"]'),
@@ -99,7 +100,12 @@ window.order_tracking_report.SalesOrderStatusBoardPage = class SalesOrderStatusB
 
 	fmt(value) {
 		const number = Number(value || 0);
-		return Number.isFinite(number) ? frappe.format(number, { fieldtype: "Float", precision: 2 }) : "0.00";
+		return Number.isFinite(number) ? number.toFixed(2) : "0.00";
+	}
+
+	fmt0(value) {
+		const number = Number(value || 0);
+		return Number.isFinite(number) ? Math.round(number).toString() : "0";
 	}
 
 	badge(text, bg, color) {
@@ -126,9 +132,9 @@ window.order_tracking_report.SalesOrderStatusBoardPage = class SalesOrderStatusB
 		const options = this.routeOptions || {};
 		const now = frappe.datetime.now_date();
 		const tenDaysAgo = frappe.datetime.add_days(now, -10);
-		this.fields.company.val(options.company || "");
-		this.fields.customer.val(options.customer || "");
-		this.fields.sales_order.val(options.sales_order || "");
+		this.linkControls.company.set_value(options.company || "");
+		this.linkControls.customer.set_value(options.customer || "");
+		this.linkControls.sales_order.set_value(options.sales_order || "");
 		this.fields.from_date.val(options.from_date || tenDaysAgo);
 		this.fields.to_date.val(options.to_date || now);
 		this.fields.so_status.val(options.so_status || "");
@@ -141,13 +147,28 @@ window.order_tracking_report.SalesOrderStatusBoardPage = class SalesOrderStatusB
 
 	getValues() {
 		return {
-			company: this.fields.company.val() || "",
-			customer: this.fields.customer.val() || "",
-			sales_order: this.fields.sales_order.val() || "",
+			company: this.linkControls.company.get_value() || "",
+			customer: this.linkControls.customer.get_value() || "",
+			sales_order: this.linkControls.sales_order.get_value() || "",
 			from_date: this.fields.from_date.val() || "",
 			to_date: this.fields.to_date.val() || "",
 			so_status: this.fields.so_status.val() || "",
 		};
+	}
+
+	makeLinkControl(fieldname, options) {
+		const parent = this.$root.find(`[data-field="${fieldname}"]`)[0];
+		const control = frappe.ui.form.make_control({
+			parent,
+			df: {
+				fieldname,
+				fieldtype: "Link",
+				options,
+				placeholder: __("Select {0}", [options]),
+			},
+			render_input: true,
+		});
+		return control;
 	}
 
 	async loadBoard() {
@@ -157,16 +178,8 @@ window.order_tracking_report.SalesOrderStatusBoardPage = class SalesOrderStatusB
 
 		try {
 			const response = await frappe.call({
-				method: "live_production_api",
-				args: {
-					action: "sales_order_pipeline",
-					company: values.company,
-					customer: values.customer,
-					sales_order: values.sales_order,
-					from_date: values.from_date,
-					to_date: values.to_date,
-					so_status: values.so_status,
-				},
+				method: "order_tracking_report.api.get_sales_order_status_board",
+				args: values,
 			});
 			const rows = response?.message?.rows || [];
 			this.renderBoard(rows);
@@ -181,8 +194,11 @@ window.order_tracking_report.SalesOrderStatusBoardPage = class SalesOrderStatusB
 		const rowsHtml = rows.map((row, index) => {
 			const woDone = Number(row.work_order_completed || 0);
 			const woTotal = Number(row.work_order_total || 0);
-			const woLabel = `${this.fmt(woDone)}/${this.fmt(woTotal)}`;
+			const woLabel = `${this.fmt0(woDone)} | ${this.fmt0(woTotal)}`;
 			const woColor = woTotal > 0 && woDone >= woTotal ? "#166534" : "#1d4ed8";
+			const ppLabel = this.escape(row.production_plan_status || "-");
+			const jcLabel = this.escape(row.job_card_status || "-");
+			const seLabel = this.escape(row.stock_entry_status || "-");
 			return `
 				<tr>
 					<td style="padding:8px;border-bottom:1px solid #f1f5f9;"><a href="/app/sales-order/${encodeURIComponent(row.sales_order || "")}" target="_blank" style="color:#1d4ed8;font-weight:700;text-decoration:none;">${this.escape(row.sales_order || "")}</a></td>
@@ -191,10 +207,10 @@ window.order_tracking_report.SalesOrderStatusBoardPage = class SalesOrderStatusB
 					<td style="padding:8px;border-bottom:1px solid #f1f5f9;">${this.soBadge(row.so_status)}</td>
 					<td style="padding:8px;border-bottom:1px solid #f1f5f9;">${this.escape(row.delivery_status || "")}</td>
 					<td style="padding:8px;border-bottom:1px solid #f1f5f9;">${this.escape(row.billing_status || "")}</td>
-					<td style="padding:8px;border-bottom:1px solid #f1f5f9;">${this.escape(row.production_plans || "")}</td>
+					<td style="padding:8px;border-bottom:1px solid #f1f5f9;"><a href="#" data-pp-popup="${index}" style="color:#0f766e;font-weight:800;text-decoration:underline;">${ppLabel}</a></td>
 					<td style="padding:8px;border-bottom:1px solid #f1f5f9;"><a href="#" data-wo-popup="${index}" style="color:${woColor};font-weight:800;text-decoration:underline;">${woLabel}</a></td>
-					<td style="padding:8px;border-bottom:1px solid #f1f5f9;">${this.fmt(row.job_card_completed || 0)}/${this.fmt(row.job_card_total || 0)}</td>
-					<td style="padding:8px;border-bottom:1px solid #f1f5f9;">${this.fmt(row.stock_entry_count || 0)}</td>
+					<td style="padding:8px;border-bottom:1px solid #f1f5f9;"><a href="#" data-jc-popup="${index}" style="color:#7c3aed;font-weight:800;text-decoration:underline;">${jcLabel}</a></td>
+					<td style="padding:8px;border-bottom:1px solid #f1f5f9;"><a href="#" data-se-popup="${index}" style="color:#0f766e;font-weight:800;text-decoration:underline;">${seLabel}</a></td>
 					<td style="padding:8px;border-bottom:1px solid #f1f5f9;">${this.pctBadge(row.wo_completion_pct || 0)}</td>
 				</tr>
 			`;
@@ -228,34 +244,107 @@ window.order_tracking_report.SalesOrderStatusBoardPage = class SalesOrderStatusB
 			const index = Number(event.currentTarget.getAttribute("data-wo-popup"));
 			const row = rows[index];
 			if (row) {
-				this.openWoJcPopup(row);
+				this.openWorkOrderPopup(row);
+			}
+		});
+		this.$board.find("[data-pp-popup]").on("click", (event) => {
+			event.preventDefault();
+			const index = Number(event.currentTarget.getAttribute("data-pp-popup"));
+			const row = rows[index];
+			if (row) {
+				this.openProductionPlanPopup(row);
+			}
+		});
+		this.$board.find("[data-jc-popup]").on("click", (event) => {
+			event.preventDefault();
+			const index = Number(event.currentTarget.getAttribute("data-jc-popup"));
+			const row = rows[index];
+			if (row) {
+				this.openJobCardPopup(row);
+			}
+		});
+		this.$board.find("[data-se-popup]").on("click", (event) => {
+			event.preventDefault();
+			const index = Number(event.currentTarget.getAttribute("data-se-popup"));
+			const row = rows[index];
+			if (row) {
+				this.openStockEntryPopup(row);
 			}
 		});
 	}
 
-	openWoJcPopup(row) {
-		const woRows = (row.wo_details || []).map((item) => ({
-			"Work Order": item.name || "",
-			"Status": item.status || "",
-			"Qty": this.fmt(item.qty || 0),
-			"Produced": this.fmt(item.produced_qty || 0),
-			"Completion %": `${Number(item.completion_pct || 0).toFixed(1)}%`,
+	openProductionPlanPopup(row) {
+		const ppRows = (row.production_plan_details || []).map((item) => ({
+			"Item": item.item || "",
+			"Planned Qty": this.fmt(item.planned_qty || 0),
+			"Produced Qty": this.fmt(item.produced_qty || 0),
+			"Pending Qty": this.fmt(item.pending_qty || 0),
+			"Ordered Qty": this.fmt(item.ordered_qty || 0),
 		}));
-		const jcRows = (row.jc_details || []).map((item) => ({
-			"Job Card": item.name || "",
-			"Work Order": item.work_order || "",
-			"Status": item.status || "",
-			"Operation": item.operation || "",
-		}));
-
 		const dialog = new frappe.ui.Dialog({
-			title: `${__("WO/JC List")} - ${row.sales_order || ""}`,
+			title: `${__("Production Plan")} - ${row.sales_order || ""}`,
 			size: "large",
 			fields: [{ fieldtype: "HTML", fieldname: "body" }],
 		});
 		dialog.fields_dict.body.$wrapper.html(
-			`<div style="margin:6px 0 6px;font-weight:800;color:#1e293b;">${__("Work Orders")}</div>${this.tableFromRows(woRows, ["Work Order", "Status", "Qty", "Produced", "Completion %"])}
-			 <div style="margin:12px 0 6px;font-weight:800;color:#1e293b;">${__("Job Cards")}</div>${this.tableFromRows(jcRows, ["Job Card", "Work Order", "Status", "Operation"])}`
+			this.tableFromRows(ppRows, ["Item", "Planned Qty", "Produced Qty", "Pending Qty", "Ordered Qty"])
+		);
+		dialog.show();
+	}
+
+	openWorkOrderPopup(row) {
+		const woRows = (row.work_order_details || row.wo_details || []).map((item) => ({
+			"Item": item.item || "",
+			"Qty": this.fmt(item.qty || 0),
+			"Material Transferred": this.fmt(item.material_transferred_for_manufacturing || 0),
+			"Produced Qty": this.fmt(item.produced_qty || 0),
+			"Process Loss Qty": this.fmt(item.process_loss_qty || 0),
+		}));
+		const dialog = new frappe.ui.Dialog({
+			title: `${__("Work Order")} - ${row.sales_order || ""}`,
+			size: "large",
+			fields: [{ fieldtype: "HTML", fieldname: "body" }],
+		});
+		dialog.fields_dict.body.$wrapper.html(
+			this.tableFromRows(woRows, ["Item", "Qty", "Material Transferred", "Produced Qty", "Process Loss Qty"])
+		);
+		dialog.show();
+	}
+
+	openJobCardPopup(row) {
+		const jcRows = (row.job_card_details || row.jc_details || []).map((item) => ({
+			"Item": item.item || "",
+			"Employee": item.employee || "",
+			"Operation": item.operation || "",
+			"For Quantity": this.fmt(item.for_quantity || 0),
+			"Total Completed Qty": this.fmt(item.total_completed_qty || 0),
+			"Process Loss Qty": this.fmt(item.process_loss_qty || 0),
+		}));
+		const dialog = new frappe.ui.Dialog({
+			title: `${__("Job Card")} - ${row.sales_order || ""}`,
+			size: "large",
+			fields: [{ fieldtype: "HTML", fieldname: "body" }],
+		});
+		dialog.fields_dict.body.$wrapper.html(
+			this.tableFromRows(jcRows, ["Item", "Employee", "Operation", "For Quantity", "Total Completed Qty", "Process Loss Qty"])
+		);
+		dialog.show();
+	}
+
+	openStockEntryPopup(row) {
+		const seRows = (row.stock_entry_details || []).map((item) => ({
+			"Work Order": item.work_order || "",
+			"Stock Entry Type": item.stock_entry_type || "",
+			"FG Completed Qty": this.fmt(item.fg_completed_qty || 0),
+			"BOM No": item.bom_no || "",
+		}));
+		const dialog = new frappe.ui.Dialog({
+			title: `${__("Stock Entry")} - ${row.sales_order || ""}`,
+			size: "large",
+			fields: [{ fieldtype: "HTML", fieldname: "body" }],
+		});
+		dialog.fields_dict.body.$wrapper.html(
+			this.tableFromRows(seRows, ["Work Order", "Stock Entry Type", "FG Completed Qty", "BOM No"])
 		);
 		dialog.show();
 	}

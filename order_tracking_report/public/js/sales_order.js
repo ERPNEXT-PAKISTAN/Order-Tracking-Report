@@ -126,15 +126,6 @@ frappe.ui.form.on("Sales Order", {
       frappe.set_route("sales-order-status-board");
     }, __("View"));
 
-    frm.add_custom_button(__("Manage Sales Orders"), () => {
-      frappe.route_options = {
-        sales_order: frm.doc.name,
-        company: frm.doc.company || "",
-        customer: frm.doc.customer || "",
-      };
-      frappe.set_route("manage-sales-orders");
-    }, __("View"));
-
     frm.add_custom_button(__("Financials"), () => {
       frappe.route_options = {
         sales_order: frm.doc.name,
@@ -142,6 +133,29 @@ frappe.ui.form.on("Sales Order", {
         customer: frm.doc.customer || "",
       };
       frappe.set_route("finanicals");
+    }, __("View"));
+
+    frm.add_custom_button(__("Purchase Order Status Report"), () => {
+      frappe.route_options = {
+        company: frm.doc.company || "",
+      };
+      frappe.set_route("query-report", "Purchase Order Status Report");
+    }, __("View"));
+
+    frm.add_custom_button(__("Sales Order Status Report"), () => {
+      frappe.route_options = {
+        sales_order: frm.doc.name || "",
+        company: frm.doc.company || "",
+        customer: frm.doc.customer || "",
+      };
+      frappe.set_route("query-report", "Sales Order Status Report");
+    }, __("View"));
+
+    frm.add_custom_button(__("Stock Report"), () => {
+      frappe.route_options = {
+        company: frm.doc.company || "",
+      };
+      frappe.set_route("query-report", "Stock Report");
     }, __("View"));
 
     frm.trigger("render_execution_dashboard");
@@ -2673,7 +2687,7 @@ const DEFAULT_COMPANY_ABBR = "AH";
 const DEFAULT_WAREHOUSE_LABELS = {
   source: "Stores",
   wip: "Work In Progress",
-  target: "Finished Good",
+  target: "Finished Goods",
   scrap: "Work In Progress"
 };
 
@@ -3853,6 +3867,43 @@ function materialShortageTable(rows){
       <tbody>${body}</tbody>
     </table>
   </div>`;
+}
+
+function salesOrderExpensesTable(rows) {
+  rows = rows || [];
+  if (!rows.length) {
+    return `<div class="text-muted">No Expense Claim rows linked with this Sales Order.</div>`;
+  }
+  const totalAmount = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+
+  const body = rows.map((r) => `
+    <tr>
+      <td>${r.expense_claim ? docLink("Expense Claim", r.expense_claim) : "-"}</td>
+      <td>${esc(fmtDT(r.expense_date || "")) || "-"}</td>
+      <td>${esc(r.expense_claim_type || "-")}</td>
+      <td>${esc(r.description || "-")}</td>
+      <td style="text-align:right;">${_money0(r.amount || 0)}</td>
+    </tr>
+  `).join("");
+
+  return `<div class="table-responsive"><table class="table table-bordered so-table" style="margin:0;">
+    <thead>
+      <tr>
+        <th>${__("Entry No")}</th>
+        <th>${__("Expense Date")}</th>
+        <th>${__("Expense Claim Type")}</th>
+        <th>${__("Description")}</th>
+        <th style="text-align:right;">${__("Amount")}</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${body}
+      <tr>
+        <td colspan="4" style="text-align:right;font-weight:900;color:#1d4ed8;">${__("Total")}</td>
+        <td style="text-align:right;font-weight:900;color:#1d4ed8;">${_money0(totalAmount)}</td>
+      </tr>
+    </tbody>
+  </table></div>`;
 }
 
 function poAnalyticsSection(data){
@@ -5960,6 +6011,10 @@ function buildDashboard(frm, data){
     `, false)}
 
     ${sectionBlock('bom', 'BOM and Raw Material Section', 'linear-gradient(90deg,#0891b2,#06b6d4)', `${card("BOM & Raw Materials", "Item and BOM merged for easier reading", bomTree(data.bom_tree||[]))}`, false)}
+
+    ${sectionBlock('expenses', 'Expenses', 'linear-gradient(90deg,#6d28d9,#9333ea)', `
+      ${card("Expenses", "Expense Claim details linked with this Sales Order", salesOrderExpensesTable(data.sales_order_expenses || []))}
+    `, false)}
 
     ${sectionBlock('dispatch', 'Dispatch Section', 'linear-gradient(90deg,#ea580c,#f97316)', `
       ${card("Order Item Summary", "Ordered, delivered, invoiced and pending quantity by item", orderItemSummaryTable(data.order_item_summary || []))}

@@ -48,6 +48,7 @@ window.order_tracking_report.ManageSalesOrdersPage = class ManageSalesOrdersPage
 		} catch (error) {
 			this.setStatus(__("Failed to load Manage Sales Orders."), "red");
 			frappe.show_alert({ message: __("Failed to load Manage Sales Orders page."), indicator: "red" }, 6);
+			this.openStatusReportFallback();
 		}
 	}
 
@@ -154,10 +155,21 @@ window.order_tracking_report.ManageSalesOrdersPage = class ManageSalesOrdersPage
 		const handler = this.getManagerHandler();
 		if (!handler) {
 			this.setStatus(__("Manage Sales Orders is not ready yet."), "orange");
-			frappe.show_alert({ message: __("Manage Sales Orders is not ready yet."), indicator: "orange" }, 4);
+			frappe.show_alert({ message: __("Manage Sales Orders is not ready. Opening Sales Order Status Report."), indicator: "orange" }, 5);
+			this.openStatusReportFallback();
 			return;
 		}
 		this.setStatus(__("Opening manager..."), "green");
 		handler(this.buildSeed());
+	}
+
+	openStatusReportFallback() {
+		const seed = this.buildSeed();
+		frappe.route_options = {
+			company: seed.company || "",
+			customer: seed.customer || "",
+			sales_order: seed.sales_order || "",
+		};
+		frappe.set_route("query-report", "Sales Order Status Report");
 	}
 };

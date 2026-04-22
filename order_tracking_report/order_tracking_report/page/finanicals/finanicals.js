@@ -974,6 +974,8 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				${this.renderMetricCard(__("Estimated Material Cost"), this.formatCurrency(summary.estimated_cost || 0), __("From default BOM"))}
 					${this.renderMetricCard(__("Estimated Profit"), this.formatCurrency(summary.estimated_profit || 0), `${this.formatPercent(summary.margin_pct || 0)} ${__("margin")}`)}
 					${this.renderMetricCard(__("Labour Cost"), this.formatCurrency(labourSummary.total_cost || 0), `${this.formatNumber(labourSummary.total_qty || 0)} ${__("qty")}`)}
+					${this.renderMetricCard(__("Expense Claims"), this.formatCurrency(statementModel.expenseClaimsAmount || 0), __("Linked Expense Claim rows"))}
+					${this.renderMetricCard(__("Profit After Expenses"), this.formatCurrency((summary.estimated_profit || 0) - (statementModel.expenseClaimsAmount || 0)), "")}
 					${this.renderMetricCard(__("Wastage Amount"), this.formatCurrency(statementModel.wastageAmount || 0), `${this.formatPercent(wastagePct)} ${__("of raw material")}`)}
 					${this.renderMetricCard(__("Stitching OH Amount"), this.formatCurrency(statementModel.stitchingOhAmount || 0), `${this.formatPercent(stitchingOhPct)} ${__("of CMT labour")}`)}
 					${this.renderMetricCard(__("Head Office Expense"), this.formatCurrency(statementModel.headOfficeExpAmount || 0), `${this.formatPercent(headOfficeExpPct)} ${__("of sales")}`)}
@@ -1071,6 +1073,8 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				${this.renderMetricCard(__("Material Cost"), this.formatCurrency(summary.estimated_cost || 0), __("From Work Order consumption"))}
 				${this.renderMetricCard(__("Estimated Profit"), this.formatCurrency(summary.estimated_profit || 0), `${this.formatPercent(summary.margin_pct || 0)} ${__("margin")}`)}
 				${this.renderMetricCard(__("Labour Cost"), this.formatCurrency(labourSummary.total_cost || 0), `${this.formatNumber(labourSummary.total_qty || 0)} ${__("qty")}`)}
+				${this.renderMetricCard(__("Expense Claims"), this.formatCurrency(statementModel.expenseClaimsAmount || 0), __("Linked Expense Claim rows"))}
+				${this.renderMetricCard(__("Profit After Expenses"), this.formatCurrency((summary.estimated_profit || 0) - (statementModel.expenseClaimsAmount || 0)), "")}
 				${this.renderMetricCard(__("Wastage Amount"), this.formatCurrency(statementModel.wastageAmount || 0), `${this.formatPercent(wastagePct)} ${__("of raw material")}`)}
 				${this.renderMetricCard(__("Stitching OH Amount"), this.formatCurrency(statementModel.stitchingOhAmount || 0), `${this.formatPercent(stitchingOhPct)} ${__("of CMT labour")}`)}
 				${this.renderMetricCard(__("Head Office Expense"), this.formatCurrency(statementModel.headOfficeExpAmount || 0), `${this.formatPercent(headOfficeExpPct)} ${__("of sales")}`)}
@@ -1166,6 +1170,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		const selectedProfitRows = data.selected_profit_by_item || [];
 		const bomRows = data.bom_rows || [];
 		const labourSummary = data.labour_cost_summary || {};
+		const salesOrderExpenses = data.sales_order_expenses || [];
 
 		const salesRows = selectedProfitRows.map((row) => {
 			const qty = Number(row.qty || 0);
@@ -1226,10 +1231,11 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 
 		const wastageAmount = totalMaterialCost * (wastagePct / 100);
 		const cmtLabourAmount = Number(labourSummary.total_cost || 0);
+		const expenseClaimsAmount = (salesOrderExpenses || []).reduce((sum, row) => sum + Number(row.amount || 0), 0);
 		const stitchingOhAmount = cmtLabourAmount * (stitchingOhPct / 100);
 		const headOfficeExpAmount = totalSales * (headOfficeExpPct / 100);
 		const bankChargesAmount = totalSales * (bankChargesPct / 100);
-		const totalExpense = totalMaterialCost + wastageAmount + cmtLabourAmount + stitchingOhAmount + headOfficeExpAmount + bankChargesAmount;
+		const totalExpense = totalMaterialCost + wastageAmount + cmtLabourAmount + expenseClaimsAmount + stitchingOhAmount + headOfficeExpAmount + bankChargesAmount;
 		const netProfit = totalSales - totalExpense;
 
 		return {
@@ -1239,6 +1245,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			totalMaterialCost,
 			wastageAmount,
 			cmtLabourAmount,
+			expenseClaimsAmount,
 			stitchingOhAmount,
 			headOfficeExpAmount,
 			bankChargesAmount,
@@ -1330,6 +1337,15 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				<td class="text-right">${dashCell}</td>
 				<td class="text-right">${dashCell}</td>
 				<td class="text-right">${this.formatCurrency(model.cmtLabourAmount)}</td>
+				<td class="text-right">${dashCell}</td>
+			</tr>
+		`);
+		rows.push(`
+			<tr class="otr-pl-row-indent">
+				<td>${__("Expense Claims")}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right">${dashCell}</td>
+				<td class="text-right">${this.formatCurrency(model.expenseClaimsAmount)}</td>
 				<td class="text-right">${dashCell}</td>
 			</tr>
 		`);
@@ -1451,6 +1467,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			<thead><tr><th>${__("Particular")}</th><th class="text-right">${__("Amount")}</th><th class="text-right">${__("Total")}</th></tr></thead>
 			<tbody>
 				<tr><td>${__("Total Sales")}</td><td class="text-right">${this.formatCurrency(model.totalSales)}</td><td class="text-right">${this.formatCurrency(model.totalSales)}</td></tr>
+				<tr><td>${__("Less: Expense Claims")}</td><td class="text-right">${this.formatCurrency(model.expenseClaimsAmount)}</td><td class="text-right">${this.formatCurrency(model.totalSales - model.expenseClaimsAmount)}</td></tr>
 				<tr><td>${__("Less: Total Expense")}</td><td class="text-right">${this.formatCurrency(model.totalExpense)}</td><td class="text-right">${this.formatCurrency(model.totalSales - model.totalExpense)}</td></tr>
 				<tr class="otr-pl-row-total"><td>${__("Net Profit")}</td><td class="text-right">${this.formatCurrency(model.netProfit)}</td><td class="text-right">${this.formatCurrency(model.netProfit)}</td></tr>
 			</tbody>
@@ -1502,6 +1519,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			{ label: __("Total Raw Material"), amount: model.totalMaterialCost },
 			{ type: "section", label: __("Expenses") },
 			{ label: __("CMT Labour Cost"), amount: model.cmtLabourAmount },
+			{ label: __("Expense Claims"), amount: model.expenseClaimsAmount },
 			{ type: "section", label: __("Estimated Overhead") },
 			{ label: __("Wastage ({0})", [this.formatPercent(percentages.wastagePct || 0)]), amount: model.wastageAmount },
 			{ label: __("Stitching OH %age ({0})", [this.formatPercent(percentages.stitchingOhPct || 0)]), amount: model.stitchingOhAmount },
@@ -1582,13 +1600,14 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		}
 		const body = rows.map((row) => `
 			<tr>
+				<td>${row.entry_no ? this.renderDocLink("Expense Claim", row.entry_no) : "-"}</td>
 				<td>${frappe.utils.escape_html(row.label || "-")}</td>
 				<td>${frappe.utils.escape_html(row.source || "-")}</td>
 				<td class="text-right">${this.formatCurrency(row.amount || 0)}</td>
 			</tr>
 		`).join("");
 		return this.wrapTable(`
-			<thead><tr><th>${__("Expense")}</th><th>${__("Source")}</th><th class="text-right">${__("Amount")}</th></tr></thead>
+			<thead><tr><th>${__("Entry No")}</th><th>${__("Expense")}</th><th>${__("Source")}</th><th class="text-right">${__("Amount")}</th></tr></thead>
 			<tbody>${body}</tbody>
 		`);
 	}
