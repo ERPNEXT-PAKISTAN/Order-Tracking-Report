@@ -225,6 +225,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				font-size: 11px;
 				font-weight: 700;
 				color: #475569;
+				display: none;
 			}
 			.otr-pl-grid {
 				display: grid;
@@ -673,7 +674,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 
 		shell.find('[data-action="load-pl-order"]').on("click", () => this.loadPlByOrder());
 		shell.find('[data-action="reset-pl-order"]').on("click", () => this.resetPlByOrder());
-		shell.find('[data-action="print-pl-order"]').on("click", () => window.print());
+		shell.find('[data-action="print-pl-order"]').on("click", () => this.printReportArea(this.$plContent && this.$plContent[0], __("PL by BOM")));
 
 		if (this.routeOptions.sales_order || this.routeOptions.delivery_note) {
 			this.openPlByOrderTab();
@@ -763,7 +764,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 
 		shell.find('[data-action="load-pl-wo"]').on("click", () => this.loadPlByWo());
 		shell.find('[data-action="reset-pl-wo"]').on("click", () => this.resetPlByWo());
-		shell.find('[data-action="print-pl-wo"]').on("click", () => window.print());
+		shell.find('[data-action="print-pl-wo"]').on("click", () => this.printReportArea(this.$plWoContent && this.$plWoContent[0], __("PL by WO")));
 
 		if (this.routeOptions.sales_order || this.routeOptions.delivery_note) {
 			this.renderPlWoEmptyState();
@@ -800,6 +801,53 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		});
 		control.set_value(config.default || 0);
 		return control;
+	}
+
+	printReportArea(container, title) {
+		if (!container) {
+			frappe.show_alert({ message: __("Nothing to print."), indicator: "orange" }, 4);
+			return;
+		}
+
+		const payloadStyle = (document.getElementById("otr-finanicals-payload-style") || {}).textContent || "";
+		const localStyle = (document.getElementById("otr-finanicals-local-style") || {}).textContent || "";
+		const extraStyle = `
+			body { font-family: Inter, Arial, sans-serif; margin: 10px; color: #0f172a; }
+			.otr-pl-toolbar, .otr-pl-status { display: none !important; }
+			.otr-pl-card .sub { display: none !important; }
+			.otr-pl-card { padding: 8px 10px !important; }
+			.otr-pl-card .label { font-size: 10px !important; }
+			.otr-pl-card .value { font-size: 14px !important; margin-top: 4px !important; }
+			@page { size: A4; margin: 8mm; }
+		`;
+		const printWindow = window.open("", "_blank");
+		if (!printWindow) {
+			frappe.show_alert({ message: __("Popup blocked. Allow popups to print."), indicator: "orange" }, 6);
+			return;
+		}
+		printWindow.document.open();
+		printWindow.document.write(`
+			<!doctype html>
+			<html>
+				<head>
+					<meta charset="utf-8">
+					<title>${frappe.utils.escape_html(title || __("PL Report"))}</title>
+					<style>${payloadStyle}</style>
+					<style>${localStyle}</style>
+					<style>${extraStyle}</style>
+				</head>
+				<body>
+					<div class="otr-print-title" style="font-size:16px;font-weight:800;margin-bottom:8px;">${frappe.utils.escape_html(title || __("PL Report"))}</div>
+					${container.innerHTML}
+				</body>
+			</html>
+		`);
+		printWindow.document.close();
+		setTimeout(() => {
+			printWindow.focus();
+			printWindow.print();
+			printWindow.close();
+		}, 250);
 	}
 
 	getControlValue(control) {
