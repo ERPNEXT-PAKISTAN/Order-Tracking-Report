@@ -2669,8 +2669,9 @@ function getCompanyAbbr(company) {
 }
 
 const COMPANY_ABBR_CACHE = {};
+const DEFAULT_COMPANY_ABBR = "AH";
 const DEFAULT_WAREHOUSE_LABELS = {
-  source: "Store",
+  source: "Stores",
   wip: "Work In Progress",
   target: "Finished Good",
   scrap: "Work In Progress"
@@ -2691,7 +2692,7 @@ function fetchCompanyAbbr(company) {
 }
 
 function getDefaultWarehouse(type, company, abbrOverride) {
-  const abbr = String(abbrOverride || "").trim() || getCompanyAbbr(company);
+  const abbr = String(abbrOverride || "").trim() || getCompanyAbbr(company) || DEFAULT_COMPANY_ABBR;
   let label = DEFAULT_WAREHOUSE_LABELS[type] || "Store";
   return abbr ? `${label} - ${abbr}` : label;
 }
