@@ -20,6 +20,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		frappe.route_options = null;
 		this.plControls = {};
 		this.plWoControls = {};
+		this.onlyPlMode = !!(this.routeOptions.only_pl || this.routeOptions.only_pl_mode);
 		setTimeout(() => this.load(), 0);
 	}
 
@@ -47,9 +48,32 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		this.installLocalStyles();
 		this.executePayloadScript(payload.script || "");
 		setTimeout(() => {
+			if (this.onlyPlMode) {
+				this.applyOnlyPlMode();
+			}
 			this.setupPlByOrder();
 			this.setupPlByWo();
+			if (this.onlyPlMode) {
+				this.openPlByOrderTab();
+			}
 		}, 0);
+	}
+
+	applyOnlyPlMode() {
+		const root = this.$root && this.$root[0];
+		if (!root) return;
+		root.querySelectorAll(".tabs .tab").forEach((tab) => {
+			const key = tab.getAttribute("data-tab");
+			if (key !== "pl-by-order" && key !== "pl-by-wo") {
+				tab.style.display = "none";
+			}
+		});
+		root.querySelectorAll(".content-panel").forEach((panel) => {
+			const id = panel.getAttribute("id");
+			if (id !== "pl-by-order" && id !== "pl-by-wo") {
+				panel.style.display = "none";
+			}
+		});
 	}
 
 	injectPlByOrderPanel(html) {
@@ -174,31 +198,31 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			.otr-pl-card-grid {
 				display: grid;
 				grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-				gap: 12px;
+				gap: 8px;
 			}
 			.otr-pl-card {
-				padding: 14px;
-				border-radius: 14px;
+				padding: 8px 10px;
+				border-radius: 10px;
 				border: 1px solid #cbd5e1;
 				background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-				box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+				box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
 			}
 			.otr-pl-card .label {
-				font-size: 11px;
+				font-size: 10px;
 				font-weight: 800;
 				letter-spacing: 0.06em;
 				text-transform: uppercase;
 				color: #64748b;
 			}
 			.otr-pl-card .value {
-				margin-top: 6px;
-				font-size: 24px;
+				margin-top: 4px;
+				font-size: 14px;
 				font-weight: 900;
 				color: #0f172a;
 			}
 			.otr-pl-card .sub {
-				margin-top: 4px;
-				font-size: 12px;
+				margin-top: 2px;
+				font-size: 11px;
 				font-weight: 700;
 				color: #475569;
 			}
@@ -586,6 +610,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				<div data-field="bank_charges_pct"></div>
 				<button class="btn btn-primary btn-sm" data-action="load-pl-order">${__("Load")}</button>
 				<button class="btn btn-default btn-sm" data-action="reset-pl-order">${__("Reset")}</button>
+				<button class="btn btn-default btn-sm" data-action="print-pl-order">${__("Print")}</button>
 			</div>
 			<div class="otr-pl-status">${__("Select a Sales Order or Delivery Note to load PL by BOM.")}</div>
 			<div class="otr-pl-content"></div>
@@ -648,6 +673,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 
 		shell.find('[data-action="load-pl-order"]').on("click", () => this.loadPlByOrder());
 		shell.find('[data-action="reset-pl-order"]').on("click", () => this.resetPlByOrder());
+		shell.find('[data-action="print-pl-order"]').on("click", () => window.print());
 
 		if (this.routeOptions.sales_order || this.routeOptions.delivery_note) {
 			this.openPlByOrderTab();
@@ -674,6 +700,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				<div data-field="bank_charges_pct"></div>
 				<button class="btn btn-primary btn-sm" data-action="load-pl-wo">${__("Load")}</button>
 				<button class="btn btn-default btn-sm" data-action="reset-pl-wo">${__("Reset")}</button>
+				<button class="btn btn-default btn-sm" data-action="print-pl-wo">${__("Print")}</button>
 			</div>
 			<div class="otr-pl-status">${__("Select a Sales Order or Delivery Note to load PL by WO.")}</div>
 			<div class="otr-pl-content"></div>
@@ -736,6 +763,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 
 		shell.find('[data-action="load-pl-wo"]').on("click", () => this.loadPlByWo());
 		shell.find('[data-action="reset-pl-wo"]').on("click", () => this.resetPlByWo());
+		shell.find('[data-action="print-pl-wo"]').on("click", () => window.print());
 
 		if (this.routeOptions.sales_order || this.routeOptions.delivery_note) {
 			this.renderPlWoEmptyState();

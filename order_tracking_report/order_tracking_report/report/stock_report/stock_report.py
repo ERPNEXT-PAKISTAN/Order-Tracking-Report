@@ -39,13 +39,13 @@ def get_rows(filters):
     conditions = ["sle.is_cancelled = 0"]
     values = {}
 
-    if filters.get("from_date"):
-        conditions.append("sle.posting_date >= %(from_date)s")
-        values["from_date"] = filters.get("from_date")
-
     if filters.get("to_date"):
-        conditions.append("sle.posting_date <= %(to_date)s")
         values["to_date"] = filters.get("to_date")
+        # Performance guard: nothing after closing date is needed.
+        conditions.append("sle.posting_date <= %(to_date)s")
+
+    if filters.get("from_date"):
+        values["from_date"] = filters.get("from_date")
 
     if filters.get("warehouse"):
         conditions.append("sle.warehouse = %(warehouse)s")
@@ -84,6 +84,8 @@ def get_rows(filters):
         values["attributes_like"] = f"%{filters.get('attributes')}%"
 
     where_sql = " AND ".join(conditions)
+    movement_window_sql = get_movement_window_sql(filters)
+    closing_window_sql = "sle.posting_date <= %(to_date)s" if filters.get("to_date") else "1=1"
 
     return frappe.db.sql(
         f"""
@@ -92,10 +94,10 @@ def get_rows(filters):
             IFNULL(i.item_name, sle.item_code) AS item_name,
             IFNULL(i.item_group, 'Uncategorized') AS item_group,
             IFNULL(i.variant_of, '') AS variant_of,
-            SUM(CASE WHEN IFNULL(sle.actual_qty, 0) > 0 THEN sle.actual_qty ELSE 0 END) AS in_qty,
-            ABS(SUM(CASE WHEN IFNULL(sle.actual_qty, 0) < 0 THEN sle.actual_qty ELSE 0 END)) AS out_qty,
-            SUM(IFNULL(sle.actual_qty, 0)) AS balance_qty,
-            SUM(IFNULL(sle.stock_value_difference, 0)) AS amount
+            SUM(CASE WHEN {movement_window_sql} AND IFNULL(sle.actual_qty, 0) > 0 THEN sle.actual_qty ELSE 0 END) AS in_qty,
+            ABS(SUM(CASE WHEN {movement_window_sql} AND IFNULL(sle.actual_qty, 0) < 0 THEN sle.actual_qty ELSE 0 END)) AS out_qty,
+            SUM(CASE WHEN {closing_window_sql} THEN IFNULL(sle.actual_qty, 0) ELSE 0 END) AS balance_qty,
+            SUM(CASE WHEN {closing_window_sql} THEN IFNULL(sle.stock_value_difference, 0) ELSE 0 END) AS amount
         FROM `tabStock Ledger Entry` sle
         LEFT JOIN `tabItem` i ON i.name = sle.item_code
         WHERE {where_sql}
@@ -105,6 +107,16 @@ def get_rows(filters):
         values,
         as_dict=True,
     )
+
+
+def get_movement_window_sql(filters):
+    if filters.get("from_date") and filters.get("to_date"):
+        return "sle.posting_date >= %(from_date)s AND sle.posting_date <= %(to_date)s"
+    if filters.get("from_date"):
+        return "sle.posting_date >= %(from_date)s"
+    if filters.get("to_date"):
+        return "sle.posting_date <= %(to_date)s"
+    return "1=1"
 
 
 def build_grouped_data(rows, group_by):
