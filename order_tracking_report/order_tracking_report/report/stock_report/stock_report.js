@@ -1,3 +1,12 @@
+function otrFormatNumber(value, precision) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n)) return "0";
+  return n.toLocaleString(undefined, {
+    minimumFractionDigits: precision,
+    maximumFractionDigits: precision,
+  });
+}
+
 frappe.query_reports["Stock Report"] = {
   tree: true,
   name_field: "_node",
@@ -78,8 +87,11 @@ frappe.query_reports["Stock Report"] = {
     if (!data) return formatted;
 
     if (["in_qty", "out_qty", "balance_qty"].includes(column.fieldname)) {
-      const n = Number(data[column.fieldname] || 0);
-      formatted = frappe.format(n, { fieldtype: "Float", precision: 1 }, {});
+      formatted = otrFormatNumber(data[column.fieldname], 1);
+    }
+
+    if (["amount", "avg_rate"].includes(column.fieldname)) {
+      formatted = frappe.format(Number(data[column.fieldname] || 0), { fieldtype: "Currency" }, {});
     }
 
     if (column.fieldname === "balance_qty") {

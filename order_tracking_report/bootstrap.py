@@ -7,6 +7,7 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 def ensure_item_po_setup():
     ensure_order_tracking_reports()
     ensure_expense_claim_sales_order_field()
+    ensure_purchase_item_supplier_status_html_fields()
     ensure_wastage_doctype()
     ensure_wastage_doctype_fields()
     remove_legacy_wastage_fields()
@@ -32,6 +33,56 @@ def ensure_expense_claim_sales_order_field():
                 "allow_on_submit": 1,
             },
         ]
+    }
+    create_custom_fields(custom_fields, update=True)
+
+
+def ensure_purchase_item_supplier_status_html_fields():
+    custom_fields = {
+        "Purchase Order": [
+            {
+                "fieldname": "custom_po_item_status_html",
+                "label": "Purchase Order Item Status",
+                "fieldtype": "HTML",
+                "insert_after": "items",
+            }
+        ],
+        "Item": [
+            {
+                "fieldname": "custom_item_purchase_status_section",
+                "label": "Purchase Order Status",
+                "fieldtype": "Section Break",
+                "insert_after": "item_name",
+            },
+            {
+                "fieldname": "custom_item_purchase_status_html",
+                "label": "Purchase Order Status",
+                "fieldtype": "HTML",
+                "insert_after": "custom_item_purchase_status_section",
+            }
+        ],
+        "Supplier": [
+            {
+                "fieldname": "custom_supplier_purchase_status_html",
+                "label": "Purchase Order Status",
+                "fieldtype": "HTML",
+                "insert_after": "supplier_group",
+            }
+        ],
+        "Employee": [
+            {
+                "fieldname": "custom_employee_advance_ledger_section",
+                "label": "Employee Advance Ledger",
+                "fieldtype": "Section Break",
+                "insert_after": "employee_advance_account",
+            },
+            {
+                "fieldname": "custom_employee_advance_ledger_html",
+                "label": "Employee Advance Ledger",
+                "fieldtype": "HTML",
+                "insert_after": "custom_employee_advance_ledger_section",
+            },
+        ],
     }
     create_custom_fields(custom_fields, update=True)
 

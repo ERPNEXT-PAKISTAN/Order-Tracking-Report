@@ -2379,3 +2379,429 @@ def get_sales_order_status_board(
         )
 
     return {"rows": rows}
+
+
+def _format_date(value):
+    if not value:
+        return ""
+    try:
+        return str(value)
+    except Exception:
+        return ""
+
+
+@frappe.whitelist()
+def get_purchase_order_item_status(purchase_order=None, from_date=None, to_date=None):
+    purchase_order = (purchase_order or "").strip()
+    if not purchase_order:
+        return {"rows": [], "meta": {}}
+
+    conditions = [
+        "po.name = %(purchase_order)s",
+        "po.docstatus < 2",
+        "LOWER(IFNULL(po.status, '')) NOT IN ('cancelled', 'canceled')",
+    ]
+    values = {"purchase_order": purchase_order}
+
+    if from_date:
+        conditions.append("po.transaction_date >= %(from_date)s")
+        values["from_date"] = from_date
+    if to_date:
+        conditions.append("po.transaction_date <= %(to_date)s")
+        values["to_date"] = to_date
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT
+            poi.item_code AS item,
+            IFNULL(poi.rate, 0) AS rate,
+            IFNULL(poi.qty, 0) AS ordered_qty,
+            IFNULL(poi.received_qty, 0) AS received_qty
+        FROM `tabPurchase Order Item` poi
+        JOIN `tabPurchase Order` po ON po.name = poi.parent
+        WHERE {" AND ".join(conditions)}
+        ORDER BY poi.idx ASC
+        """,
+        values,
+        as_dict=True,
+    )
+
+    po_meta = frappe.db.get_value(
+        "Purchase Order",
+        purchase_order,
+        ["status", "transaction_date", "supplier", "company"],
+        as_dict=True,
+    ) or {}
+
+    out = []
+    for row in rows:
+        ordered = _num(row.get("ordered_qty"))
+        received = _num(row.get("received_qty"))
+        pending = ordered - received
+        if pending < 0:
+            pending = 0
+        out.append(
+            {
+                "item": row.get("item"),
+                "rate": _num(row.get("rate")),
+                "ordered_qty": ordered,
+                "received_qty": received,
+                "pending_qty": pending,
+            }
+        )
+
+    return {
+        "rows": out,
+        "meta": {
+            "purchase_order": purchase_order,
+            "status": po_meta.get("status") or "",
+            "date": _format_date(po_meta.get("transaction_date")),
+            "supplier": po_meta.get("supplier") or "",
+            "company": po_meta.get("company") or "",
+        },
+    }
+
+
+@frappe.whitelist()
+def get_item_purchase_order_status(item_code=None, from_date=None, to_date=None):
+    item_code = (item_code or "").strip()
+    if not item_code:
+        return {"rows": []}
+
+    conditions = [
+        "poi.item_code = %(item_code)s",
+        "po.docstatus < 2",
+        "LOWER(IFNULL(po.status, '')) NOT IN ('cancelled', 'canceled')",
+    ]
+    values = {"item_code": item_code}
+
+    if from_date:
+        conditions.append("po.transaction_date >= %(from_date)s")
+        values["from_date"] = from_date
+    if to_date:
+        conditions.append("po.transaction_date <= %(to_date)s")
+        values["to_date"] = to_date
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT
+            po.name AS purchase_order,
+            po.transaction_date AS date,
+            po.supplier,
+            IFNULL(poi.rate, 0) AS rate,
+            IFNULL(poi.qty, 0) AS ordered_qty,
+            IFNULL(poi.received_qty, 0) AS received_qty
+        FROM `tabPurchase Order Item` poi
+        JOIN `tabPurchase Order` po ON po.name = poi.parent
+        WHERE {" AND ".join(conditions)}
+        ORDER BY po.transaction_date DESC, po.name DESC, poi.idx ASC
+        """,
+        values,
+        as_dict=True,
+    )
+
+    out = []
+    for row in rows:
+        ordered = _num(row.get("ordered_qty"))
+        received = _num(row.get("received_qty"))
+        pending = ordered - received
+        if pending < 0:
+            pending = 0
+        out.append(
+            {
+                "purchase_order": row.get("purchase_order"),
+                "date": _format_date(row.get("date")),
+                "supplier": row.get("supplier") or "",
+                "rate": _num(row.get("rate")),
+                "ordered_qty": ordered,
+                "received_qty": received,
+                "pending_qty": pending,
+            }
+        )
+
+    return {"rows": out}
+
+
+@frappe.whitelist()
+def get_supplier_purchase_order_status(supplier=None, from_date=None, to_date=None):
+    supplier = (supplier or "").strip()
+    if not supplier:
+        return {"rows": []}
+
+    conditions = [
+        "po.supplier = %(supplier)s",
+        "po.docstatus < 2",
+        "LOWER(IFNULL(po.status, '')) NOT IN ('cancelled', 'canceled')",
+    ]
+    values = {"supplier": supplier}
+
+    if from_date:
+        conditions.append("po.transaction_date >= %(from_date)s")
+        values["from_date"] = from_date
+    if to_date:
+        conditions.append("po.transaction_date <= %(to_date)s")
+        values["to_date"] = to_date
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT
+            po.name AS purchase_order,
+            po.transaction_date AS date,
+            poi.item_code AS item,
+            IFNULL(poi.rate, 0) AS rate,
+            IFNULL(poi.qty, 0) AS ordered_qty,
+            IFNULL(poi.received_qty, 0) AS received_qty
+        FROM `tabPurchase Order Item` poi
+        JOIN `tabPurchase Order` po ON po.name = poi.parent
+        WHERE {" AND ".join(conditions)}
+        ORDER BY po.transaction_date DESC, po.name DESC, poi.idx ASC
+        """,
+        values,
+        as_dict=True,
+    )
+
+    out = []
+    for row in rows:
+        ordered = _num(row.get("ordered_qty"))
+        received = _num(row.get("received_qty"))
+        pending = ordered - received
+        if pending < 0:
+            pending = 0
+        out.append(
+            {
+                "purchase_order": row.get("purchase_order"),
+                "date": _format_date(row.get("date")),
+                "item": row.get("item") or "",
+                "rate": _num(row.get("rate")),
+                "ordered_qty": ordered,
+                "received_qty": received,
+                "pending_qty": pending,
+            }
+        )
+
+    return {"rows": out}
+
+
+@frappe.whitelist()
+def get_employee_advance_ledger(employee=None, from_date=None, to_date=None):
+    employee = (employee or "").strip()
+    if not employee:
+        return {"rows": [], "gl_rows": []}
+
+    conditions = [
+        "ea.employee = %(employee)s",
+        "ea.docstatus < 2",
+        "LOWER(IFNULL(ea.status, '')) NOT IN ('cancelled', 'canceled')",
+    ]
+    values = {"employee": employee}
+
+    if from_date:
+        conditions.append("ea.posting_date >= %(from_date)s")
+        values["from_date"] = from_date
+    if to_date:
+        conditions.append("ea.posting_date <= %(to_date)s")
+        values["to_date"] = to_date
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT
+            ea.name AS employee_advance,
+            ea.posting_date AS date,
+            IFNULL(ea.purpose, '') AS purpose,
+            IFNULL(ea.advance_amount, 0) AS advance_amount,
+            IFNULL(ea.paid_amount, 0) AS paid_amount,
+            IFNULL(ea.claimed_amount, 0) AS claimed_amount,
+            IFNULL(ea.return_amount, 0) AS return_amount,
+            IFNULL(ea.pending_amount, 0) AS pending_amount,
+            IFNULL(ea.status, '') AS status
+        FROM `tabEmployee Advance` ea
+        WHERE {" AND ".join(conditions)}
+        ORDER BY ea.posting_date DESC, ea.name DESC
+        """,
+        values,
+        as_dict=True,
+    )
+
+    summary_values = {"employee": employee}
+    summary_conditions = [
+        "ea.employee = %(employee)s",
+        "ea.docstatus = 1",
+        "LOWER(IFNULL(ea.status, '')) NOT IN ('cancelled', 'canceled')",
+    ]
+    if to_date:
+        summary_conditions.append("ea.posting_date <= %(to_date)s")
+        summary_values["to_date"] = to_date
+
+    advance_opening = 0.0
+    if from_date:
+        advance_opening = _num(
+            frappe.db.sql(
+                """
+                SELECT
+                    IFNULL(SUM(IFNULL(ea.paid_amount, 0) - IFNULL(ea.claimed_amount, 0) - IFNULL(ea.return_amount, 0)), 0)
+                FROM `tabEmployee Advance` ea
+                WHERE
+                    ea.employee = %(employee)s
+                    AND ea.docstatus = 1
+                    AND LOWER(IFNULL(ea.status, '')) NOT IN ('cancelled', 'canceled')
+                    AND ea.posting_date < %(from_date)s
+                """,
+                {"employee": employee, "from_date": from_date},
+            )[0][0]
+            or 0
+        )
+
+    advance_totals = frappe.db.sql(
+        f"""
+        SELECT
+            IFNULL(SUM(IFNULL(ea.paid_amount, 0)), 0) AS paid_amount,
+            IFNULL(SUM(IFNULL(ea.claimed_amount, 0)), 0) AS claimed_amount,
+            IFNULL(SUM(IFNULL(ea.return_amount, 0)), 0) AS return_amount
+        FROM `tabEmployee Advance` ea
+        WHERE {" AND ".join(summary_conditions)}
+        """,
+        summary_values,
+        as_dict=True,
+    )
+    advance_totals = (advance_totals or [{}])[0]
+    paid_total = _num(advance_totals.get("paid_amount"))
+    claimed_total = _num(advance_totals.get("claimed_amount"))
+    return_total = _num(advance_totals.get("return_amount"))
+    advance_closing = paid_total - claimed_total - return_total
+    advance_delta = advance_closing - advance_opening
+
+    employee_advance_account = (
+        frappe.db.get_value("Employee", employee, "employee_advance_account") or ""
+    ).strip()
+    if not employee_advance_account:
+        employee_advance_account = (
+            frappe.db.sql(
+                """
+                SELECT IFNULL(ea.advance_account, '')
+                FROM `tabEmployee Advance` ea
+                WHERE ea.employee = %(employee)s
+                    AND IFNULL(ea.advance_account, '') != ''
+                ORDER BY ea.posting_date DESC, ea.name DESC
+                LIMIT 1
+                """,
+                {"employee": employee},
+            )[0][0]
+            or ""
+        ).strip()
+
+    gl_base_conditions = [
+        "gl.is_cancelled = 0",
+        "IFNULL(gl.party_type, '') = 'Employee'",
+        "IFNULL(gl.party, '') = %(employee)s",
+    ]
+    gl_base_values = {"employee": employee}
+    if employee_advance_account:
+        gl_base_conditions.append("gl.account = %(advance_account)s")
+        gl_base_values["advance_account"] = employee_advance_account
+
+    gl_opening = 0.0
+    if from_date:
+        opening_conditions = list(gl_base_conditions) + ["gl.posting_date < %(from_date)s"]
+        opening_values = dict(gl_base_values)
+        opening_values["from_date"] = from_date
+        gl_opening = _num(
+            frappe.db.sql(
+                f"""
+                SELECT IFNULL(SUM(IFNULL(gl.debit, 0) - IFNULL(gl.credit, 0)), 0)
+                FROM `tabGL Entry` gl
+                WHERE {" AND ".join(opening_conditions)}
+                """,
+                opening_values,
+            )[0][0]
+            or 0
+        )
+
+    gl_range_conditions = list(gl_base_conditions)
+    gl_range_values = dict(gl_base_values)
+    if from_date:
+        gl_range_conditions.append("gl.posting_date >= %(from_date)s")
+        gl_range_values["from_date"] = from_date
+    if to_date:
+        gl_range_conditions.append("gl.posting_date <= %(to_date)s")
+        gl_range_values["to_date"] = to_date
+
+    gl_rows_raw = frappe.db.sql(
+        f"""
+        SELECT
+            gl.posting_date,
+            gl.voucher_type,
+            gl.voucher_no,
+            gl.account,
+            IFNULL(gl.debit, 0) AS debit,
+            IFNULL(gl.credit, 0) AS credit,
+            IFNULL(gl.remarks, '') AS remarks
+        FROM `tabGL Entry` gl
+        WHERE {" AND ".join(gl_range_conditions)}
+        ORDER BY gl.posting_date ASC, gl.creation ASC, gl.name ASC
+        """,
+        gl_range_values,
+        as_dict=True,
+    )
+
+    gl_rows = []
+    running_balance = gl_opening
+    gl_debit_total = 0.0
+    gl_credit_total = 0.0
+    for row in gl_rows_raw:
+        debit = _num(row.get("debit"))
+        credit = _num(row.get("credit"))
+        running_balance += debit - credit
+        gl_debit_total += debit
+        gl_credit_total += credit
+        gl_rows.append(
+            {
+                "date": _format_date(row.get("posting_date")),
+                "voucher_type": row.get("voucher_type") or "",
+                "voucher_no": row.get("voucher_no") or "",
+                "account": row.get("account") or "",
+                "debit": debit,
+                "credit": credit,
+                "remarks": row.get("remarks") or "",
+                "running_balance": running_balance,
+            }
+        )
+
+    gl_closing = gl_opening + gl_debit_total - gl_credit_total
+    gl_delta = gl_closing - gl_opening
+
+    out = []
+    for row in rows:
+        out.append(
+            {
+                "employee_advance": row.get("employee_advance"),
+                "date": _format_date(row.get("date")),
+                "purpose": row.get("purpose") or "",
+                "advance_amount": _num(row.get("advance_amount")),
+                "paid_amount": _num(row.get("paid_amount")),
+                "claimed_amount": _num(row.get("claimed_amount")),
+                "return_amount": _num(row.get("return_amount")),
+                "pending_amount": _num(row.get("pending_amount")),
+                "status": row.get("status") or "",
+            }
+        )
+
+    return {
+        "rows": out,
+        "summary": {
+            "opening_balance": advance_opening,
+            "paid_amount": paid_total,
+            "claimed_amount": claimed_total,
+            "return_amount": return_total,
+            "range_delta": advance_delta,
+            "closing_balance": advance_closing,
+        },
+        "gl_rows": gl_rows,
+        "gl_summary": {
+            "account": employee_advance_account,
+            "opening_balance": gl_opening,
+            "debit_total": gl_debit_total,
+            "credit_total": gl_credit_total,
+            "range_delta": gl_delta,
+            "closing_balance": gl_closing,
+        },
+    }

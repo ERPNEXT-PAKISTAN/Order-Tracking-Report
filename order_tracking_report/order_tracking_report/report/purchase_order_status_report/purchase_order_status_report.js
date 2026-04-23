@@ -1,3 +1,12 @@
+function otrFormatNumber(value, precision) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n)) return "0";
+  return n.toLocaleString(undefined, {
+    minimumFractionDigits: precision,
+    maximumFractionDigits: precision,
+  });
+}
+
 frappe.query_reports["Purchase Order Status Report"] = {
   tree: true,
   name_field: "_node",
@@ -79,8 +88,7 @@ frappe.query_reports["Purchase Order Status Report"] = {
     if (!data) return formatted;
 
     if (["qty", "received_qty", "pending_qty"].includes(column.fieldname)) {
-      const n = Number(data[column.fieldname] || 0);
-      formatted = frappe.format(n, { fieldtype: "Float", precision: 1 }, {});
+      formatted = otrFormatNumber(data[column.fieldname], 1);
     }
 
     if (column.fieldname === "status") {
