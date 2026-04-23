@@ -41,6 +41,8 @@ fixtures = [
 				"Purchase Order Status Report",
 				"Sales Order Status Report",
 				"Stock Report",
+				"Supplier Wise Purchases Detail",
+				"Consumption Report",
 			],
 		]],
 	},
@@ -104,6 +106,22 @@ fixtures = [
 	{
 		"dt": "Print Format",
 		"filters": [["name", "in", ["Sales Order Contract", "Sales Order Contract with Comment"]]],
+	},
+	{
+		"dt": "Report",
+		"filters": [[
+			"name",
+			"in",
+			[
+				"Per Piece Query Report Simple",
+				"Per Piece Salary Report",
+				"Purchase Order Status Report",
+				"Sales Order Status Report",
+				"Stock Report",
+				"Supplier Wise Purchases Detail",
+				"Consumption Report",
+			],
+		]],
 	},
 	{
 		"dt": "Server Script",

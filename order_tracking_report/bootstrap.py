@@ -91,6 +91,8 @@ def ensure_order_tracking_reports():
     ensure_script_report("Purchase Order Status Report", "Purchase Order")
     ensure_script_report("Sales Order Status Report", "Sales Order")
     ensure_script_report("Stock Report", "Stock Ledger Entry")
+    ensure_script_report("Supplier Wise Purchases Detail", "Purchase Order")
+    ensure_script_report("Consumption Report", "Stock Entry")
 
 
 def ensure_script_report(report_name, ref_doctype):
@@ -532,6 +534,12 @@ def ensure_stock_reports_shortcuts():
     _ensure_workspace_report_shortcut(
         "Stock", "Stock Report", "Stock Report", "green"
     )
+    _ensure_workspace_report_shortcut(
+        "Stock", "Supplier Wise Purchases Detail", "Supplier Wise Purchases Detail", "blue"
+    )
+    _ensure_workspace_report_shortcut(
+        "Stock", "Consumption Report", "Consumption Report", "orange"
+    )
 
 
 def ensure_order_tracking_workspace():
@@ -554,6 +562,12 @@ def ensure_order_tracking_workspace_shortcuts():
     _ensure_workspace_page_shortcut("Order Tracking", "Finanicals", "finanicals", "grey")
     _ensure_workspace_report_shortcut(
         "Order Tracking", "Purchase Order Updated Status", "Purchase Order updated Status", "yellow"
+    )
+    _ensure_workspace_report_shortcut(
+        "Order Tracking", "Supplier Wise Purchases Detail", "Supplier Wise Purchases Detail", "blue"
+    )
+    _ensure_workspace_report_shortcut(
+        "Order Tracking", "Consumption Report", "Consumption Report", "orange"
     )
 
 
