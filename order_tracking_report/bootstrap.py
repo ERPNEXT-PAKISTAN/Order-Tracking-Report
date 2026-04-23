@@ -269,6 +269,7 @@ def ensure_sales_order_live_shortcuts():
     remove_workspace_page_shortcut("Manufacturing", "Manage Sales Orders", "manage-sales-orders")
     ensure_order_tracking_workspace()
     ensure_order_tracking_workspace_shortcuts()
+    ensure_order_tracking_reports_workspace_shortcuts()
 
 
 def _ensure_workspace(
@@ -570,6 +571,53 @@ def ensure_order_tracking_workspace_shortcuts():
     )
     _ensure_workspace_report_shortcut(
         "Order Tracking", "Consumption Report", "Consumption Report", "orange"
+    )
+
+
+def ensure_order_tracking_reports_workspace_shortcuts():
+    _ensure_workspace(
+        "Order Tracking Reports",
+        title="Order Tracking Reports",
+        icon="report",
+        sequence_id=8.2,
+        parent_page="",
+    )
+
+    # Sales Order View action shortcuts (best route equivalent for workspace)
+    _ensure_workspace_page_shortcut("Order Tracking Reports", "Refresh Detail Status", "sales-order-status-board", "blue")
+    _ensure_workspace_page_shortcut("Order Tracking Reports", "Sales Order Live", "sales-order-live", "blue")
+    _ensure_workspace_page_shortcut("Order Tracking Reports", "Live Work Order", "live-work-order", "green")
+    _ensure_workspace_page_shortcut("Order Tracking Reports", "All Related Links", "sales-order-live", "cyan")
+    _ensure_workspace_page_shortcut(
+        "Order Tracking Reports", "Sales Order Status Board", "sales-order-status-board", "orange"
+    )
+    _ensure_workspace_page_shortcut("Order Tracking Reports", "Finanicals", "finanicals", "grey")
+    _ensure_workspace_page_shortcut("Order Tracking Reports", "PL by Order", "pl-by-order", "cyan")
+    _ensure_workspace_page_shortcut(
+        "Order Tracking Reports", "Daily Operation Page", "daily-operation-report", "purple"
+    )
+
+    # Reports from Sales Order View menu
+    _ensure_workspace_report_shortcut(
+        "Order Tracking Reports", "Purchase Order Status Report", "Purchase Order Status Report", "blue"
+    )
+    _ensure_workspace_report_shortcut(
+        "Order Tracking Reports", "Purchase Order Updated Status", "Purchase Order updated Status", "yellow"
+    )
+    _ensure_workspace_report_shortcut(
+        "Order Tracking Reports", "Sales Order Status Report", "Sales Order Status Report", "orange"
+    )
+    _ensure_workspace_report_shortcut(
+        "Order Tracking Reports", "Stock Report", "Stock Report", "green"
+    )
+    _ensure_workspace_report_shortcut(
+        "Order Tracking Reports", "Daily Operation Report", "Daily Operation Report", "teal"
+    )
+    _ensure_workspace_report_shortcut(
+        "Order Tracking Reports", "Supplier Wise Purchases Detail", "Supplier Wise Purchases Detail", "cyan"
+    )
+    _ensure_workspace_report_shortcut(
+        "Order Tracking Reports", "Consumption Report", "Consumption Report", "grey"
     )
 
 

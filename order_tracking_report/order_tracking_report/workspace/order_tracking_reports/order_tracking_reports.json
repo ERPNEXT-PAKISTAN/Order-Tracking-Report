@@ -1,7 +1,7 @@
 {
  "app": "order_tracking_report",
  "charts": [],
- "content": "[\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Purchase Order Updated Status\"\n  },\n  \"id\": \"otrrpt0001\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Purchase Order Status Report\"\n  },\n  \"id\": \"otrrpt0002\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Sales Order Status Report\"\n  },\n  \"id\": \"otrrpt0003\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Stock Report\"\n  },\n  \"id\": \"otrrpt0004\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Supplier Wise Purchases Detail\"\n  },\n  \"id\": \"otrrpt0005\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Consumption Report\"\n  },\n  \"id\": \"otrrpt0006\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Daily Operation Report\"\n  },\n  \"id\": \"otrrpt0007\",\n  \"type\": \"shortcut\"\n }\n]",
+ "content": "[\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Sales Order Live\"\n  },\n  \"id\": \"otrrpt0001\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Live Work Order\"\n  },\n  \"id\": \"otrrpt0002\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Sales Order Status Board\"\n  },\n  \"id\": \"otrrpt0003\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Finanicals\"\n  },\n  \"id\": \"otrrpt0004\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"PL by Order\"\n  },\n  \"id\": \"otrrpt0005\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Daily Operation Page\"\n  },\n  \"id\": \"otrrpt0006\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Purchase Order Updated Status\"\n  },\n  \"id\": \"otrrpt0007\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Purchase Order Status Report\"\n  },\n  \"id\": \"otrrpt0008\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Sales Order Status Report\"\n  },\n  \"id\": \"otrrpt0009\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Stock Report\"\n  },\n  \"id\": \"otrrpt0010\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Daily Operation Report\"\n  },\n  \"id\": \"otrrpt0011\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Supplier Wise Purchases Detail\"\n  },\n  \"id\": \"otrrpt0012\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Consumption Report\"\n  },\n  \"id\": \"otrrpt0013\",\n  \"type\": \"shortcut\"\n }\n]",
  "creation": "2026-04-24 01:00:00.000000",
  "custom_blocks": [],
  "docstatus": 0,
@@ -25,6 +25,42 @@
  "roles": [],
  "sequence_id": 0.0,
  "shortcuts": [
+  {
+   "color": "blue",
+   "label": "Sales Order Live",
+   "link_to": "sales-order-live",
+   "type": "Page"
+  },
+  {
+   "color": "green",
+   "label": "Live Work Order",
+   "link_to": "live-work-order",
+   "type": "Page"
+  },
+  {
+   "color": "orange",
+   "label": "Sales Order Status Board",
+   "link_to": "sales-order-status-board",
+   "type": "Page"
+  },
+  {
+   "color": "grey",
+   "label": "Finanicals",
+   "link_to": "finanicals",
+   "type": "Page"
+  },
+  {
+   "color": "cyan",
+   "label": "PL by Order",
+   "link_to": "pl-by-order",
+   "type": "Page"
+  },
+  {
+   "color": "purple",
+   "label": "Daily Operation Page",
+   "link_to": "daily-operation-report",
+   "type": "Page"
+  },
   {
    "color": "yellow",
    "label": "Purchase Order Updated Status",
@@ -62,7 +98,7 @@
    "type": "Report"
   },
   {
-   "color": "purple",
+   "color": "teal",
    "label": "Daily Operation Report",
    "link_to": "Daily Operation Report",
    "type": "Report"
