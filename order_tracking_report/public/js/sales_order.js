@@ -168,6 +168,22 @@ frappe.ui.form.on("Sales Order", {
       frappe.set_route("query-report", "Stock Report");
     }, __("View"));
 
+    frm.add_custom_button(__("Daily Operation Report"), () => {
+      frappe.route_options = {
+        sales_order: frm.doc.name || "",
+        company: frm.doc.company || "",
+      };
+      frappe.set_route("query-report", "Daily Operation Report");
+    }, __("View"));
+
+    frm.add_custom_button(__("Daily Operation Page"), () => {
+      frappe.route_options = {
+        sales_order: frm.doc.name || "",
+        company: frm.doc.company || "",
+      };
+      frappe.set_route("daily-operation-report");
+    }, __("View"));
+
     frm.add_custom_button(__("Supplier Wise Purchases Detail"), () => {
       frappe.route_options = {
         company: frm.doc.company || "",
