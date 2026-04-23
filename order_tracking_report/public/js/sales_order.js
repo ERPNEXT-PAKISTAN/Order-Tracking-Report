@@ -152,6 +152,13 @@ frappe.ui.form.on("Sales Order", {
       frappe.set_route("query-report", "Purchase Order Status Report");
     }, __("View"));
 
+    frm.add_custom_button(__("Purchase Order updated Status"), () => {
+      frappe.route_options = {
+        company: frm.doc.company || "",
+      };
+      frappe.set_route("query-report", "Purchase Order updated Status");
+    }, __("View"));
+
     frm.add_custom_button(__("Sales Order Status Report"), () => {
       frappe.route_options = {
         sales_order: frm.doc.name || "",
