@@ -194,6 +194,7 @@ required_apps = ["erpnext", "hrms"]
 # app_include_css = "/assets/order_tracking_report/css/order_tracking_report.css"
 app_include_js = [
 	"/assets/order_tracking_report/js/data_entry/sales_order_data_entry.js",
+	"/assets/order_tracking_report/js/packing_item_list_invoice.js",
 ]
 
 # include js, css files in header of web template
@@ -216,6 +217,7 @@ doctype_js = {
 	"Work Order": "public/js/work_order.js",
 	"Job Card": "public/js/job_card.js",
 	"Salary Slip": "public/js/salary_slip.js",
+	"Packing Item List Invoice": "public/js/packing_item_list_invoice.js",
 	"Purchase Order": "public/js/data_entry/purchase_order_data_entry.js",
 	"Item": "public/js/item_purchase_status.js",
 	"Supplier": "public/js/supplier_purchase_status.js",

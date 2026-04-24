@@ -19,6 +19,45 @@ def ensure_item_po_setup():
     ensure_allow_on_submit_for_po_fields()
     ensure_sales_order_po_tab_field_order()
     ensure_sales_order_item_custom_fields()
+    ensure_packing_item_list_link_fields()
+
+
+def ensure_packing_item_list_link_fields():
+    if not frappe.db.exists("DocType", "Packing Items List"):
+        return
+
+    changed = False
+    changed |= _ensure_doctype_field_type_and_options(
+        "Packing Items List", "delivery_note", "Link", "Delivery Note"
+    )
+    changed |= _ensure_doctype_field_type_and_options(
+        "Packing Items List", "sale_order", "Link", "Sales Order"
+    )
+
+    if changed:
+        frappe.clear_cache(doctype="Packing Items List")
+
+
+def _ensure_doctype_field_type_and_options(parent_doctype, fieldname, fieldtype, options=None):
+    df = frappe.db.get_value(
+        "DocField",
+        {"parent": parent_doctype, "fieldname": fieldname},
+        ["name", "fieldtype", "options"],
+        as_dict=True,
+    )
+    if not df:
+        return False
+
+    updates = {}
+    if df.get("fieldtype") != fieldtype:
+        updates["fieldtype"] = fieldtype
+    if options is not None and (df.get("options") or "") != options:
+        updates["options"] = options
+
+    if updates:
+        frappe.db.set_value("DocField", df.get("name"), updates, update_modified=False)
+        return True
+    return False
 
 
 def ensure_expense_claim_sales_order_field():
