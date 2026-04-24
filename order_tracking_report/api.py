@@ -2037,6 +2037,38 @@ def get_item_process_rows(item_group=None, item=None):
 
 
 @frappe.whitelist()
+def get_per_piece_delivery_note_items(delivery_note=None):
+    """Return submitted Delivery Note items for Per Piece Data Entry.
+
+    Uses frappe.get_all to avoid client-side read permission dependency on
+    Delivery Note Item in frappe.client.get_list calls from web page scripts.
+    """
+    delivery_note = (delivery_note or "").strip()
+    if not delivery_note:
+        return []
+
+    rows = frappe.get_all(
+        "Delivery Note Item",
+        filters={"parent": delivery_note, "docstatus": ["<", 2]},
+        fields=["item_code", "item_name", "against_sales_order", "qty"],
+        order_by="idx asc",
+        limit_page_length=2000,
+    )
+
+    output = []
+    for row in rows:
+        item_code = (row.get("item_code") or "").strip()
+        item_name = (row.get("item_name") or "").strip()
+        output.append({
+            "item_code": item_code,
+            "item_name": item_name or item_code,
+            "against_sales_order": (row.get("against_sales_order") or "").strip(),
+            "qty": frappe.utils.flt(row.get("qty")),
+        })
+    return output
+
+
+@frappe.whitelist()
 def force_sync_per_piece_status():
     """Re-sync JV/payment status on all Per Piece rows from live Journal Entry state."""
     def _round2(v):
