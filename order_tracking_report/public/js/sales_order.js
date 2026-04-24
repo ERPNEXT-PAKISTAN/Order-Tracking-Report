@@ -206,6 +206,21 @@ frappe.ui.form.on("Sales Order", {
       frappe.set_route("query-report", "Consumption Report");
     }, __("View"));
 
+    frm.add_custom_button(__("Packing Item List Invoice"), () => {
+      frappe.new_doc("Packing Item List Invoice", {
+        sales_order: frm.doc.name || "",
+        customer: frm.doc.customer || "",
+        company: frm.doc.company || "",
+        date: frm.doc.transaction_date || frappe.datetime.get_today(),
+      });
+    }, __("View"));
+
+    frm.add_custom_button(__("Packing List Invoices"), () => {
+      frappe.set_route("List", "Packing Item List Invoice", {
+        sales_order: frm.doc.name || "",
+      });
+    }, __("View"));
+
     frm.trigger("render_execution_dashboard");
   },
 

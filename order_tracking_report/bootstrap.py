@@ -6,7 +6,11 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 def ensure_item_po_setup():
     ensure_order_tracking_reports()
+    ensure_packing_slip_print_format()
     ensure_expense_claim_sales_order_field()
+    ensure_packing_weight_fields()
+    remove_packing_invoice_weight_fields()
+    remove_main_weight_fields_for_sales_and_delivery()
     ensure_purchase_item_supplier_status_html_fields()
     ensure_wastage_doctype()
     ensure_wastage_doctype_fields()
@@ -19,6 +23,174 @@ def ensure_item_po_setup():
     ensure_allow_on_submit_for_po_fields()
     ensure_sales_order_po_tab_field_order()
     ensure_sales_order_item_custom_fields()
+
+
+def ensure_packing_slip_print_format():
+    name = "Packing Slip"
+    html = """
+<style>
+  .ps-wrap { font-family: Arial, sans-serif; color: #111; font-size: 12px; }
+  .ps-brand { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  .ps-brand td { border: 1px solid #111; padding: 8px; vertical-align: middle; }
+  .ps-brand-title { font-size: 21px; font-weight: 700; text-align: center; letter-spacing: 0.2px; }
+  .ps-logo-box { width: 90px; text-align: center; }
+  .ps-logo { max-height: 68px; max-width: 80px; object-fit: contain; }
+  .ps-head { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+  .ps-head td { border: 1px solid #111; padding: 8px; vertical-align: top; font-weight: 700; font-size: 13px; line-height: 1.35; }
+  .ps-table { width: 100%; border-collapse: collapse; }
+  .ps-table th, .ps-table td { border: 1px solid #111; padding: 5px 6px; }
+  .ps-table th { font-size: 13px; font-weight: 700; text-align: center; line-height: 1.1; }
+  .ps-center { text-align: center; }
+  .ps-right { text-align: right; }
+  .ps-item { font-weight: 700; text-transform: uppercase; text-align: center; vertical-align: middle; }
+  .ps-color { font-weight: 700; text-align: center; vertical-align: middle; }
+  .ps-size { text-align: center; }
+  .ps-total td { font-weight: 700; font-size: 13px; }
+  .ps-muted { color: #222; }
+</style>
+
+<div class="ps-wrap">
+  {% set company_logo = frappe.db.get_value("Company", doc.company, "company_logo") if doc.company else "" %}
+  <table class="ps-brand">
+    <tr>
+      <td>
+        <div class="ps-brand-title">{{ doc.company or "" }}</div>
+      </td>
+      <td class="ps-logo-box">
+        {% if company_logo %}
+          <img class="ps-logo" src="{{ company_logo }}">
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <table class="ps-head">
+    <tr>
+      <td style="width:38%;">
+        <div>Invoice# {{ doc.invoice_no or doc.name }}</div>
+        {% if doc.delivery_note %}<div class="ps-muted">({{ doc.delivery_note }})</div>{% endif %}
+      </td>
+      <td style="width:35%; text-align:center;">
+        <div>{{ doc.customer or "" }}</div>
+        {% if doc.container_no %}<div>Container: {{ doc.container_no }}</div>{% endif %}
+        {% if doc.seal_no %}<div>(Seal#{{ doc.seal_no }})</div>{% endif %}
+      </td>
+      <td style="width:27%; text-align:center;">
+        {{ frappe.utils.formatdate(doc.date) if doc.date else "" }}
+      </td>
+    </tr>
+  </table>
+
+  <table class="ps-table">
+    <thead>
+      <tr>
+        <th rowspan="2">Item</th>
+        <th rowspan="2">Colour/Standard</th>
+        <th rowspan="2">Size</th>
+        <th colspan="2">Numbering</th>
+        <th rowspan="2">Pcs/CTN</th>
+        <th rowspan="2">CTN</th>
+        <th rowspan="2">Total Pcs</th>
+      </tr>
+      <tr>
+        <th>from</th>
+        <th>to</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set rows = (doc.packing_items or [])
+        | sort(attribute='carton_number_from')
+        | sort(attribute='color')
+        | sort(attribute='item') %}
+      {% for row in rows %}
+      {% set i = loop.index0 %}
+      {% set prev = rows[i-1] if i > 0 else None %}
+      {% set show_item = (i == 0) or ((prev.item or "") != (row.item or "")) %}
+      {% set show_color = show_item or ((prev.color or "") != (row.color or "")) %}
+
+      {% set item_span = namespace(v=0, stop=0) %}
+      {% if show_item %}
+        {% for r2 in rows[i:] %}
+          {% if item_span.stop == 0 and (r2.item or "") == (row.item or "") %}
+            {% set item_span.v = item_span.v + 1 %}
+          {% elif item_span.stop == 0 %}
+            {% set item_span.stop = 1 %}
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+
+      {% set color_span = namespace(v=0, stop=0) %}
+      {% if show_color %}
+        {% for r3 in rows[i:] %}
+          {% if color_span.stop == 0 and (r3.item or "") == (row.item or "") and (r3.color or "") == (row.color or "") %}
+            {% set color_span.v = color_span.v + 1 %}
+          {% elif color_span.stop == 0 %}
+            {% set color_span.stop = 1 %}
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+
+      <tr>
+        {% if show_item %}
+        <td class="ps-item" rowspan="{{ item_span.v }}">{{ row.item or "" }}</td>
+        {% endif %}
+        {% if show_color %}
+        <td class="ps-color" rowspan="{{ color_span.v }}">{{ row.color or "" }}</td>
+        {% endif %}
+        <td class="ps-size">{{ row.size or "" }}</td>
+        <td class="ps-right">{{ frappe.format_value(row.carton_number_from, {"fieldtype":"Float", "precision":0}) if row.carton_number_from is not none else "" }}</td>
+        <td class="ps-right">{{ frappe.format_value(row.carton_number_to, {"fieldtype":"Float", "precision":0}) if row.carton_number_to is not none else "" }}</td>
+        <td class="ps-right">{{ frappe.format_value(row.pcs_per_ctn, {"fieldtype":"Float", "precision":0}) if row.pcs_per_ctn is not none else "" }}</td>
+        <td class="ps-right">{{ frappe.format_value(row.ctn, {"fieldtype":"Float", "precision":0}) if row.ctn is not none else "" }}</td>
+        <td class="ps-right">{{ frappe.format_value(row.total_pcs, {"fieldtype":"Float", "precision":0}) if row.total_pcs is not none else "" }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="ps-total">
+        <td colspan="6" class="ps-right">Total</td>
+        <td class="ps-right">
+          {{ frappe.format_value((doc.packing_items | map(attribute='ctn') | list | sum), {"fieldtype":"Float", "precision":0}) }}
+        </td>
+        <td class="ps-right">
+          {{ frappe.format_value((doc.packing_items | map(attribute='total_pcs') | list | sum), {"fieldtype":"Float", "precision":0}) }}
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+""".strip()
+
+    if not frappe.db.exists("Print Format", name):
+        frappe.get_doc(
+            {
+                "doctype": "Print Format",
+                "name": name,
+                "doc_type": "Packing Item List Invoice",
+                "module": "Order Tracking Report",
+                "print_format_type": "Jinja",
+                "custom_format": 1,
+                "standard": "No",
+                "disabled": 0,
+                "raw_printing": 0,
+                "html": html,
+            }
+        ).insert(ignore_permissions=True)
+        return
+
+    frappe.db.set_value(
+        "Print Format",
+        name,
+        {
+            "doc_type": "Packing Item List Invoice",
+            "module": "Order Tracking Report",
+            "print_format_type": "Jinja",
+            "custom_format": 1,
+            "standard": "No",
+            "disabled": 0,
+            "raw_printing": 0,
+            "html": html,
+        },
+        update_modified=False,
+    )
     ensure_packing_item_list_link_fields()
 
 
@@ -33,9 +205,16 @@ def ensure_packing_item_list_link_fields():
     changed |= _ensure_doctype_field_type_and_options(
         "Packing Items List", "sale_order", "Link", "Sales Order"
     )
+    changed |= _ensure_doctype_field_type_and_options(
+        "Packing Items List", "sales_order", "Link", "Sales Order"
+    )
+    changed |= _ensure_doctype_field_type_and_options(
+        "Packing Item List Invoice", "sales_order", "Link", "Sales Order"
+    )
 
     if changed:
         frappe.clear_cache(doctype="Packing Items List")
+        frappe.clear_cache(doctype="Packing Item List Invoice")
 
 
 def _ensure_doctype_field_type_and_options(parent_doctype, fieldname, fieldtype, options=None):
@@ -74,6 +253,83 @@ def ensure_expense_claim_sales_order_field():
         ]
     }
     create_custom_fields(custom_fields, update=True)
+
+
+def ensure_packing_weight_fields():
+    custom_fields = {
+        "Sales Order Item": [
+            {
+                "fieldname": "gross_weight",
+                "label": "Gross Weight",
+                "fieldtype": "Data",
+                "insert_after": "qty",
+            },
+            {
+                "fieldname": "net_weight",
+                "label": "Net Weight",
+                "fieldtype": "Data",
+                "insert_after": "gross_weight",
+            },
+        ],
+        "Delivery Note Item": [
+            {
+                "fieldname": "gross_weight",
+                "label": "Gross Weight",
+                "fieldtype": "Data",
+                "insert_after": "qty",
+            },
+            {
+                "fieldname": "net_weight",
+                "label": "Net Weight",
+                "fieldtype": "Data",
+                "insert_after": "gross_weight",
+            },
+        ],
+        "Item": [
+            {
+                "fieldname": "custom_gross_weight_uom",
+                "label": "Gross Weight",
+                "fieldtype": "Data",
+                "insert_after": "weight_per_unit",
+            },
+            {
+                "fieldname": "custom_net_weight",
+                "label": "Net Weight",
+                "fieldtype": "Data",
+                "insert_after": "custom_gross_weight_uom",
+            },
+        ],
+    }
+    # Create missing fields only; do not force-change type of already existing fields.
+    create_custom_fields(custom_fields, update=False)
+
+
+def remove_packing_invoice_weight_fields():
+    for fieldname in ("gross_weight", "net_weight"):
+        cf_name = frappe.db.get_value(
+            "Custom Field",
+            {"dt": "Packing Item List Invoice", "fieldname": fieldname},
+            "name",
+        )
+        if cf_name:
+            frappe.delete_doc("Custom Field", cf_name, ignore_permissions=True, force=True)
+
+
+def remove_main_weight_fields_for_sales_and_delivery():
+    targets = [
+        ("Sales Order", "gross_weight"),
+        ("Sales Order", "net_weight"),
+        ("Delivery Note", "gross_weight"),
+        ("Delivery Note", "net_weight"),
+    ]
+    for dt, fieldname in targets:
+        cf_name = frappe.db.get_value(
+            "Custom Field",
+            {"dt": dt, "fieldname": fieldname},
+            "name",
+        )
+        if cf_name:
+            frappe.delete_doc("Custom Field", cf_name, ignore_permissions=True, force=True)
 
 
 def ensure_purchase_item_supplier_status_html_fields():
@@ -134,6 +390,18 @@ def ensure_order_tracking_reports():
     ensure_script_report("Supplier Wise Purchases Detail", "Purchase Order")
     ensure_script_report("Consumption Report", "Stock Entry")
     ensure_script_report("Daily Operation Report", "Daily Production")
+    ensure_report_roles(
+        "Consumption Report",
+        [
+            "System Manager",
+            "Manufacturing Manager",
+            "Manufacturing User",
+            "Stock Manager",
+            "Stock User",
+            "Sales Manager",
+            "Sales User",
+        ],
+    )
 
 
 def ensure_script_report(report_name, ref_doctype):
@@ -172,6 +440,31 @@ def ensure_script_report(report_name, ref_doctype):
 
     if updates:
         frappe.db.set_value("Report", report_name, updates, update_modified=False)
+
+
+def ensure_report_roles(report_name, roles):
+    if not frappe.db.exists("Report", report_name):
+        return
+
+    existing_roles = set(
+        frappe.get_all(
+            "Has Role",
+            filters={"parenttype": "Report", "parent": report_name, "parentfield": "roles"},
+            pluck="role",
+        )
+    )
+    for role in roles:
+        if role in existing_roles:
+            continue
+        frappe.get_doc(
+            {
+                "doctype": "Has Role",
+                "parenttype": "Report",
+                "parent": report_name,
+                "parentfield": "roles",
+                "role": role,
+            }
+        ).db_insert(ignore_if_duplicate=True)
 
 
 # Ensure custom fields on Sales Order Item for fabric quality, design color, comments

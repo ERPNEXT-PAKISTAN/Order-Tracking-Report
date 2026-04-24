@@ -33,6 +33,12 @@
   },
   {
    "role": "Stock User"
+  },
+  {
+   "role": "Sales Manager"
+  },
+  {
+   "role": "Sales User"
   }
  ]
 }

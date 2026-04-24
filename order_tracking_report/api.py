@@ -111,6 +111,76 @@ def _aggregate_qty_by_item(rows):
 
 
 @frappe.whitelist()
+def get_submitted_delivery_note_map_for_sales_order(sales_order=None, item_codes=None):
+    sales_order = (sales_order or "").strip()
+    if not sales_order:
+        return {}
+
+    if not frappe.has_permission("Sales Order", "read", doc=sales_order):
+        frappe.throw("Not permitted")
+
+    if isinstance(item_codes, str):
+        try:
+            item_codes = frappe.parse_json(item_codes)
+        except Exception:
+            item_codes = []
+    item_codes = [c for c in (item_codes or []) if (c or "").strip()]
+    if not item_codes:
+        return {}
+
+    rows = frappe.db.sql(
+        """
+        SELECT dni.item_code, dni.parent AS delivery_note
+        FROM `tabDelivery Note Item` dni
+        INNER JOIN `tabDelivery Note` dn ON dn.name = dni.parent
+        LEFT JOIN `tabSales Order Item` soi ON soi.name = dni.so_detail
+        WHERE
+            dn.docstatus = 1
+            AND (
+                IFNULL(dni.against_sales_order, '') = %(sales_order)s
+                OR IFNULL(soi.parent, '') = %(sales_order)s
+            )
+            AND dni.item_code IN %(item_codes)s
+        ORDER BY dni.creation DESC
+        """,
+        {"sales_order": sales_order, "item_codes": tuple(item_codes)},
+        as_dict=True,
+    )
+
+    out = {}
+    for row in rows:
+        item_code = (row.get("item_code") or "").strip()
+        delivery_note = (row.get("delivery_note") or "").strip()
+        if not item_code or not delivery_note or item_code in out:
+            continue
+        out[item_code] = delivery_note
+
+    if "__default" not in out:
+        default_dn = frappe.db.sql(
+            """
+            SELECT dn.name
+            FROM `tabDelivery Note` dn
+            WHERE dn.docstatus = 1
+              AND dn.name IN (
+                SELECT DISTINCT dni.parent
+                FROM `tabDelivery Note Item` dni
+                LEFT JOIN `tabSales Order Item` soi ON soi.name = dni.so_detail
+                WHERE
+                    IFNULL(dni.against_sales_order, '') = %(sales_order)s
+                    OR IFNULL(soi.parent, '') = %(sales_order)s
+              )
+            ORDER BY dn.posting_date DESC, dn.creation DESC
+            LIMIT 1
+            """,
+            {"sales_order": sales_order},
+            as_dict=True,
+        )
+        if default_dn:
+            out["__default"] = default_dn[0].get("name")
+    return out
+
+
+@frappe.whitelist()
 def get_sales_order_items_for_daily_production(sales_order=None, item_group=None):
     sales_order = (sales_order or "").strip()
     item_group = (item_group or "").strip()

@@ -107,7 +107,15 @@ fixtures = [
 	},
 	{
 		"dt": "Print Format",
-		"filters": [["name", "in", ["Sales Order Contract", "Sales Order Contract with Comment"]]],
+		"filters": [[
+			"name",
+			"in",
+			[
+				"Sales Order Contract",
+				"Sales Order Contract with Comment",
+				"Packing Slip",
+			],
+		]],
 	},
 	{
 		"dt": "Report",
@@ -218,6 +226,7 @@ doctype_js = {
 	"Job Card": "public/js/job_card.js",
 	"Salary Slip": "public/js/salary_slip.js",
 	"Packing Item List Invoice": "public/js/packing_item_list_invoice.js",
+	"Delivery Note": "public/js/delivery_note_packing_links.js",
 	"Purchase Order": "public/js/data_entry/purchase_order_data_entry.js",
 	"Item": "public/js/item_purchase_status.js",
 	"Supplier": "public/js/supplier_purchase_status.js",
