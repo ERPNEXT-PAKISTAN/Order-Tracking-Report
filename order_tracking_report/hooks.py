@@ -155,7 +155,18 @@ fixtures = [
 	{
 		"dt": "DocType",
 		"filters": [
-			["name", "in", ["Daily Overtime", "Overtime", "Per Piece", "Per Piece Salary"]],
+			[
+				"name",
+				"in",
+				[
+					"Daily Overtime",
+					"Overtime",
+					"Per Piece",
+					"Per Piece Salary",
+					"Packing Item List Invoice",
+					"Packing Items List",
+				],
+			],
 		],
 	},
 ]
