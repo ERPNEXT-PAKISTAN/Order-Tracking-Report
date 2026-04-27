@@ -47,7 +47,6 @@ def get_columns():
 def get_rows(filters):
     conditions = [
         "sle.is_cancelled = 0",
-        "se.name = sle.voucher_no",
         "sle.voucher_type = 'Stock Entry'",
         "sle.actual_qty < 0",
     ]
@@ -96,7 +95,7 @@ def get_rows(filters):
         )
         values["attributes_like"] = f"%{filters.get('attributes')}%"
     if filters.get("sales_order"):
-        conditions.append("IFNULL(se.sales_order, '') = %(sales_order)s")
+        conditions.append("IFNULL(wo.sales_order, '') = %(sales_order)s")
         values["sales_order"] = filters.get("sales_order")
 
     return frappe.db.sql(
@@ -111,9 +110,11 @@ def get_rows(filters):
             IFNULL(i.item_name, sle.item_code) AS item_name,
             ABS(IFNULL(sle.actual_qty, 0)) AS consumption_qty,
             ABS(IFNULL(sle.stock_value_difference, 0)) AS amount
-        FROM `tabStock Ledger Entry` sle, `tabStock Entry` se, `tabItem` i
+        FROM `tabStock Ledger Entry` sle
+        INNER JOIN `tabStock Entry` se ON se.name = sle.voucher_no
+        INNER JOIN `tabItem` i ON i.name = sle.item_code
+        LEFT JOIN `tabWork Order` wo ON wo.name = se.work_order
         WHERE {" AND ".join(conditions)}
-          AND i.name = sle.item_code
         ORDER BY sle.posting_date DESC, se.name DESC, i.item_name ASC
         """,
         values,

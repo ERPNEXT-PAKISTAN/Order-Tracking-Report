@@ -1370,6 +1370,111 @@ def get_sales_order_pl_by_order(sales_order=None, delivery_note=None):
 
 
 @frappe.whitelist()
+def get_item_cmt_total_rates(item_codes=None):
+    if isinstance(item_codes, str):
+        try:
+            parsed = frappe.parse_json(item_codes)
+            item_codes = parsed if isinstance(parsed, list) else [item_codes]
+        except Exception:
+            item_codes = [x.strip() for x in item_codes.split(",") if (x or "").strip()]
+    item_codes = [
+        (item_code or "").strip()
+        for item_code in (item_codes or [])
+        if (item_code or "").strip()
+    ]
+    if not item_codes:
+        return {}
+
+    fields = ["name"]
+    has_cmt_total_rate = frappe.db.has_column("Item", "custom_cmt_total_rate")
+    has_cmt_total = frappe.db.has_column("Item", "custom_cmt_total")
+    has_cmt_overhead_rate = frappe.db.has_column("Item", "custom_cmt_overhead_rate")
+    has_cmt_overhead_pct = frappe.db.has_column("Item", "custom_cmt_overhead_")
+    if has_cmt_total_rate:
+        fields.append("custom_cmt_total_rate")
+    if has_cmt_total:
+        fields.append("custom_cmt_total")
+    if has_cmt_overhead_rate:
+        fields.append("custom_cmt_overhead_rate")
+    if has_cmt_overhead_pct:
+        fields.append("custom_cmt_overhead_")
+
+    rows = frappe.get_all(
+        "Item",
+        filters={"name": ["in", sorted(set(item_codes))]},
+        fields=fields,
+        limit_page_length=len(item_codes),
+    )
+    out = {}
+    process_rates_by_item = _get_item_process_rate_totals(rows)
+
+    for row in rows:
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        cmt_total = frappe.utils.flt(row.get("custom_cmt_total"))
+        cmt_overhead_rate = frappe.utils.flt(row.get("custom_cmt_overhead_rate"))
+        cmt_total_rate = frappe.utils.flt(row.get("custom_cmt_total_rate"))
+        cmt_overhead_pct = frappe.utils.flt(row.get("custom_cmt_overhead_"))
+
+        process_total = frappe.utils.flt(process_rates_by_item.get(name))
+        if not cmt_total and process_total:
+            cmt_total = process_total
+
+        if not cmt_overhead_rate and cmt_total and cmt_overhead_pct:
+            cmt_overhead_rate = cmt_total * (cmt_overhead_pct / 100.0)
+
+        if not cmt_total_rate and cmt_total:
+            cmt_total_rate = cmt_total + cmt_overhead_rate
+
+        out[name] = {
+            "cmt_total_rate": frappe.utils.flt(cmt_total_rate),
+            "cmt_total": frappe.utils.flt(cmt_total),
+            "cmt_overhead_rate": frappe.utils.flt(cmt_overhead_rate),
+        }
+    return out
+
+
+def _get_item_process_rate_totals(item_rows):
+    item_names = [(row.get("name") or "").strip() for row in item_rows or [] if (row.get("name") or "").strip()]
+    if not item_names:
+        return {}
+
+    item_meta = frappe.get_meta("Item")
+    table_field = item_meta.get_field("custom_prd_process_and_sizes")
+    child_doctype = (table_field.options or "").strip() if table_field else ""
+    if not child_doctype or not frappe.db.exists("DocType", child_doctype):
+        return {}
+
+    child_meta = frappe.get_meta(child_doctype)
+    if not child_meta.get_field("rate") or not child_meta.get_field("process_type"):
+        return {}
+
+    table_name = f"`tab{child_doctype}`"
+    try:
+        rows = frappe.db.sql(
+            f"""
+            SELECT parent, SUM(COALESCE(rate, 0)) AS total_rate
+            FROM {table_name}
+            WHERE parenttype = 'Item'
+              AND parent IN %(item_names)s
+              AND COALESCE(process_type, '') != ''
+            GROUP BY parent
+            """,
+            {"item_names": tuple(item_names)},
+            as_dict=True,
+        )
+    except Exception:
+        return {}
+
+    return {
+        (row.get("parent") or "").strip(): frappe.utils.flt(row.get("total_rate"))
+        for row in rows or []
+        if (row.get("parent") or "").strip()
+    }
+
+
+@frappe.whitelist()
 def get_sales_order_pl_by_wo(sales_order=None, delivery_note=None):
     try:
         sales_order = (sales_order or "").strip()

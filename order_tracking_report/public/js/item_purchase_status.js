@@ -1,4 +1,6 @@
 (function () {
+	const _registered_child_handlers = {};
+
 	function esc(v) { return frappe.utils.escape_html(v == null ? "" : String(v)); }
 	function n(v) {
 		const x = Number(v || 0);
@@ -8,6 +10,78 @@
 	}
 	function fromDateDefault() {
 		return frappe.datetime.add_days(frappe.datetime.now_date(), -90);
+	}
+
+	function toFloat(v) {
+		const x = Number(v || 0);
+		return Number.isFinite(x) ? x : 0;
+	}
+
+	function roundTo(v, p) {
+		const m = Math.pow(10, p || 2);
+		return Math.round((toFloat(v) + Number.EPSILON) * m) / m;
+	}
+
+	function getProcessRateBase(frm) {
+		const rows = frm.doc.custom_prd_process_and_sizes || [];
+		let total = 0;
+		for (const r of rows) {
+			if ((r.process_type || "").trim()) {
+				total += toFloat(r.rate);
+			}
+		}
+		return total;
+	}
+
+	function recalculateCmtOverheadRate(frm) {
+		if (!frm || !frm.doc) return;
+		if (!frm.fields_dict.custom_cmt_overhead_rate) return;
+		const percent = toFloat(frm.doc.custom_cmt_overhead_);
+		const base = getProcessRateBase(frm);
+		const computed = roundTo((base * percent) / 100, 2);
+		const current = roundTo(frm.doc.custom_cmt_overhead_rate, 2);
+		if (computed !== current) {
+			frm.set_value("custom_cmt_overhead_rate", computed);
+		}
+	}
+
+	function recalculateCmtTotals(frm) {
+		if (!frm || !frm.doc) return;
+		if (!frm.fields_dict.custom_cmt_total || !frm.fields_dict.custom_cmt_total_rate) return;
+		const cmtTotal = roundTo(getProcessRateBase(frm), 2);
+		const overheadRate = roundTo(frm.doc.custom_cmt_overhead_rate, 2);
+		const cmtTotalRate = roundTo(cmtTotal + overheadRate, 2);
+
+		const currentTotal = roundTo(frm.doc.custom_cmt_total, 2);
+		const currentTotalRate = roundTo(frm.doc.custom_cmt_total_rate, 2);
+
+		if (currentTotal !== cmtTotal) {
+			frm.set_value("custom_cmt_total", cmtTotal);
+		}
+		if (currentTotalRate !== cmtTotalRate) {
+			frm.set_value("custom_cmt_total_rate", cmtTotalRate);
+		}
+	}
+
+	function recalculateAllCmtFields(frm) {
+		recalculateCmtOverheadRate(frm);
+		recalculateCmtTotals(frm);
+	}
+
+	function registerProcessChildHandlers(frm) {
+		const table_field = frm.fields_dict.custom_prd_process_and_sizes;
+		const child_doctype = table_field && table_field.df ? table_field.df.options : "";
+		if (!child_doctype || _registered_child_handlers[child_doctype]) return;
+		_registered_child_handlers[child_doctype] = true;
+
+		frappe.ui.form.on(child_doctype, {
+			rate(parent_frm) {
+				recalculateAllCmtFields(parent_frm);
+			},
+			process_type(parent_frm) {
+				recalculateAllCmtFields(parent_frm);
+			},
+		});
 	}
 	function renderTable(rows) {
 		if (!rows || !rows.length) {
@@ -65,10 +139,12 @@
 
 	frappe.ui.form.on("Item", {
 		refresh(frm) {
+			registerProcessChildHandlers(frm);
 			const field = frm.get_field("custom_item_purchase_status_html");
 			if (!field || !field.$wrapper) return;
 			if (frm.is_new()) {
 				field.$wrapper.html(`<div style="padding:8px;color:#64748b;">Save Item to load purchase order status report.</div>`);
+				recalculateAllCmtFields(frm);
 				return;
 			}
 			field.$wrapper.html(`
@@ -92,6 +168,23 @@
 				loadItemStatus(frm, fromInput.val(), toInput.val());
 			});
 			loadItemStatus(frm, fromInput.val(), toInput.val());
+			recalculateAllCmtFields(frm);
+		},
+
+		validate(frm) {
+			recalculateAllCmtFields(frm);
+		},
+
+		custom_cmt_overhead_(frm) {
+			recalculateAllCmtFields(frm);
+		},
+
+		custom_prd_process_and_sizes_add(frm) {
+			recalculateAllCmtFields(frm);
+		},
+
+		custom_prd_process_and_sizes_remove(frm) {
+			recalculateAllCmtFields(frm);
 		},
 	});
 })();

@@ -843,22 +843,22 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		this.plCmtControls.wastage_pct = this.makeFloatControl(shell.find('[data-field="wastage_pct"]')[0], {
 			fieldname: "wastage_pct",
 			label: __("Wastage %"),
-			default: this.routeOptions.wastage_pct || 10,
+			default: this.routeOptions.wastage_pct || 0,
 		});
 		this.plCmtControls.stitching_oh_pct = this.makeFloatControl(shell.find('[data-field="stitching_oh_pct"]')[0], {
 			fieldname: "stitching_oh_pct",
 			label: __("Stitching OH %"),
-			default: this.routeOptions.stitching_oh_pct || 60,
+			default: this.routeOptions.stitching_oh_pct || 0,
 		});
 		this.plCmtControls.head_office_exp_pct = this.makeFloatControl(shell.find('[data-field="head_office_exp_pct"]')[0], {
 			fieldname: "head_office_exp_pct",
 			label: __("Head Office Expense %age"),
-			default: this.routeOptions.head_office_exp_pct || 5,
+			default: this.routeOptions.head_office_exp_pct || 0,
 		});
 		this.plCmtControls.bank_charges_pct = this.makeFloatControl(shell.find('[data-field="bank_charges_pct"]')[0], {
 			fieldname: "bank_charges_pct",
 			label: __("Bank Charges %age"),
-			default: this.routeOptions.bank_charges_pct || 3,
+			default: this.routeOptions.bank_charges_pct || 0,
 		});
 
 		if (this.plCmtControls.wastage_pct.$input) {
@@ -1094,10 +1094,10 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 	resetPlByCmt() {
 		this.plCmtControls.sales_order.set_value("");
 		this.plCmtControls.delivery_note.set_value("");
-		this.plCmtControls.wastage_pct.set_value(10);
-		this.plCmtControls.stitching_oh_pct.set_value(60);
-		this.plCmtControls.head_office_exp_pct.set_value(5);
-		this.plCmtControls.bank_charges_pct.set_value(3);
+		this.plCmtControls.wastage_pct.set_value(0);
+		this.plCmtControls.stitching_oh_pct.set_value(0);
+		this.plCmtControls.head_office_exp_pct.set_value(0);
+		this.plCmtControls.bank_charges_pct.set_value(0);
 		this.latestPlCmtData = null;
 		this.$plCmtStatus.text(__("Select a Sales Order or Delivery Note to load PL by CMT."));
 		this.renderPlCmtEmptyState();
@@ -1199,11 +1199,30 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			if (data.sales_order && !salesOrder && (!data.linked_sales_orders || data.linked_sales_orders.length <= 1)) {
 				this.plCmtControls.sales_order.set_value(data.sales_order);
 			}
+			await this.enrichCmtRates(data);
 			this.renderPlByCmt(data);
 		} catch (error) {
 			this.$plCmtStatus.text(__("Failed to load PL by CMT."));
 			this.$plCmtContent.html(`<div class="otr-pl-empty">${__("PL by CMT could not be loaded.")}</div>`);
 			frappe.show_alert({ message: __("Failed to load PL by CMT."), indicator: "red" }, 5);
+		}
+	}
+
+	async enrichCmtRates(data) {
+		const rows = data.selected_profit_by_item || [];
+		const itemCodes = [...new Set(rows.map((row) => String(row.item_code || "").trim()).filter(Boolean))];
+		if (!itemCodes.length) {
+			data.cmt_rate_map = {};
+			return;
+		}
+		try {
+			const response = await frappe.call({
+				method: "order_tracking_report.api.get_item_cmt_total_rates",
+				args: { item_codes: itemCodes },
+			});
+			data.cmt_rate_map = response.message || {};
+		} catch (error) {
+			data.cmt_rate_map = {};
 		}
 	}
 
@@ -1407,20 +1426,24 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 
 	renderPlByCmt(data) {
 		this.latestPlCmtData = data;
-		const summary = data.selected_profit_summary || data.profit_summary || {};
 		const baseSummary = data.profit_summary || {};
 		const labourSummary = data.labour_cost_summary || {};
 		const deliveryNotes = data.delivery_note_options || [];
 		const invoiceDetails = data.invoice_details || [];
-		const itemGroupSummary = data.item_group_summary || [];
 		const linkedSalesOrders = data.linked_sales_orders || [];
 		const selectedDn = data.selected_delivery_note || "";
+		const relatedExpenseRows = (data.related_expenses || []).filter((row) => {
+			const label = String((row && row.label) || "").trim().toLowerCase();
+			return label !== "estimated material cost" && label !== "procurement amount";
+		});
 		const wastagePct = this.getPercentValue(this.plCmtControls.wastage_pct);
 		const stitchingOhPct = this.getPercentValue(this.plCmtControls.stitching_oh_pct);
 		const headOfficeExpPct = this.getPercentValue(this.plCmtControls.head_office_exp_pct);
 		const bankChargesPct = this.getPercentValue(this.plCmtControls.bank_charges_pct);
 		const statementModel = this.buildCmtStatementModel(
+			data,
 			this.buildOrderStatementModel(data, { wastagePct, stitchingOhPct, headOfficeExpPct, bankChargesPct }),
+			{ wastagePct, stitchingOhPct, headOfficeExpPct, bankChargesPct },
 		);
 		const modeLabel = selectedDn
 			? __("Showing Delivery Note level allocation focused on CMT and overhead (without raw material section).")
@@ -1432,16 +1455,16 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		const html = `
 			<div class="otr-pl-note">${frappe.utils.escape_html(modeLabel)} • ${__("Wastage %")}: ${this.formatPercent(wastagePct)} • ${__("Stitching OH %")}: ${this.formatPercent(stitchingOhPct)} • ${__("Head Office Expense %age")}: ${this.formatPercent(headOfficeExpPct)} • ${__("Bank Charges %age")}: ${this.formatPercent(bankChargesPct)}</div>
 			<div class="otr-pl-card-grid">
-				${this.renderMetricCard(__("Sales Amount"), this.formatCurrency(summary.sales_amount || 0), selectedDn ? __("Selected delivery note") : __("Sales order total"))}
-				${this.renderMetricCard(__("Estimated Material Cost"), this.formatCurrency(statementModel.totalMaterialCost || 0), __("Removed in CMT view"))}
-				${this.renderMetricCard(__("Estimated Profit"), this.formatCurrency(statementModel.netProfit || 0), `${this.formatPercent(summary.margin_pct || 0)} ${__("margin")}`)}
+				${this.renderMetricCard(__("Sales Amount"), this.formatCurrency(statementModel.totalSales || 0), selectedDn ? __("Selected delivery note") : __("Sales order total (Qty × CMT Total Rate)"))}
+				${this.renderMetricCard(__("Estimated Overhead"), this.formatCurrency(statementModel.totalOverhead || 0), __("Calculated on CMT income"))}
+				${this.renderMetricCard(__("Estimated Profit"), this.formatCurrency(statementModel.netProfit || 0), `${this.formatPercent(statementModel.netMarginPct || 0)} ${__("margin")}`)}
 				${this.renderMetricCard(__("Labour Cost"), this.formatCurrency(labourSummary.total_cost || 0), `${this.formatNumber(labourSummary.total_qty || 0)} ${__("qty")}`)}
 				${this.renderMetricCard(__("Expense Claims"), this.formatCurrency(statementModel.expenseClaimsAmount || 0), __("Linked Expense Claim rows"))}
 				${this.renderMetricCard(__("Profit After Expenses"), this.formatCurrency(statementModel.netProfit || 0), "")}
-				${this.renderMetricCard(__("Wastage Amount"), this.formatCurrency(statementModel.wastageAmount || 0), __("Removed in CMT view"))}
-				${this.renderMetricCard(__("Stitching OH Amount"), this.formatCurrency(statementModel.stitchingOhAmount || 0), `${this.formatPercent(stitchingOhPct)} ${__("of CMT labour")}`)}
-				${this.renderMetricCard(__("Head Office Expense"), this.formatCurrency(statementModel.headOfficeExpAmount || 0), `${this.formatPercent(headOfficeExpPct)} ${__("of sales")}`)}
-				${this.renderMetricCard(__("Bank Charges"), this.formatCurrency(statementModel.bankChargesAmount || 0), `${this.formatPercent(bankChargesPct)} ${__("of sales")}`)}
+				${this.renderMetricCard(__("Wastage Amount"), this.formatCurrency(statementModel.wastageAmount || 0), `${this.formatPercent(wastagePct)} ${__("of CMT income")}`)}
+				${this.renderMetricCard(__("Stitching OH Amount"), this.formatCurrency(statementModel.stitchingOhAmount || 0), `${this.formatPercent(stitchingOhPct)} ${__("of CMT income")}`)}
+				${this.renderMetricCard(__("Head Office Expense"), this.formatCurrency(statementModel.headOfficeExpAmount || 0), `${this.formatPercent(headOfficeExpPct)} ${__("of CMT income")}`)}
+				${this.renderMetricCard(__("Bank Charges"), this.formatCurrency(statementModel.bankChargesAmount || 0), `${this.formatPercent(bankChargesPct)} ${__("of CMT income")}`)}
 				${this.renderMetricCard(__("Delivery Notes"), this.formatNumber(deliveryNotes.length), selectedDn ? __("Current selection applied") : __("Linked with this order"))}
 				${this.renderMetricCard(__("Base Order Profit"), this.formatCurrency(baseSummary.estimated_profit || 0), `${this.formatPercent(baseSummary.margin_pct || 0)} ${__("margin")}`)}
 			</div>
@@ -1457,6 +1480,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 						headOfficeExpPct,
 						bankChargesPct,
 						hideRawMaterials: true,
+						showCmtRates: true,
 					})}
 				</div>
 				<div class="otr-pl-row-2">
@@ -1471,30 +1495,21 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 							stitchingOhPct,
 							headOfficeExpPct,
 							bankChargesPct,
+							hideRawMaterials: true,
 						})}
 					</div>
 				</div>
 				<div class="otr-pl-section">
 					<h3>${__("Item Group Wise Summary")}</h3>
-					${this.renderItemGroupSummaryTable(itemGroupSummary)}
+					${this.renderItemGroupSummaryTable(statementModel.itemGroupSummary || [])}
 				</div>
 				<div class="otr-pl-section">
 					<h3>${__("Profit by Item")}</h3>
-					${this.renderProfitTable(data.selected_profit_by_item || [])}
+					${this.renderProfitTable(statementModel.profitRows || [])}
 				</div>
 				<div class="otr-pl-section">
 					<h3>${__("Related Expenses")}</h3>
-					${this.renderRelatedExpensesTable(data.related_expenses || [])}
-				</div>
-				<div class="otr-pl-row-2">
-					<div class="otr-pl-section">
-						<h3>${selectedDn ? __("Delivery Note Items") : __("Linked Delivery Notes")}</h3>
-						${selectedDn ? this.renderDeliveryNoteItemTable(data.delivery_note_items || []) : this.renderDeliveryNoteOptionsTable(deliveryNotes)}
-					</div>
-					<div class="otr-pl-section">
-						<h3>${selectedDn ? __("Linked Sales Invoices") : __("Procurement by Item Group")}</h3>
-						${selectedDn ? this.renderInvoiceDetails(invoiceDetails) : this.renderPoItemGroupTable(data.po_item_group_summary || [])}
-					</div>
+					${this.renderRelatedExpensesTable(relatedExpenseRows)}
 				</div>
 				<div class="otr-pl-section">
 					<h3>${__("Labour Cost Detail")}</h3>
@@ -1507,19 +1522,121 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		this.bindPlStatementInteractions(this.$plCmtContent);
 	}
 
-	buildCmtStatementModel(baseModel) {
+	buildCmtStatementModel(data, baseModel, options = {}) {
 		const model = Object.assign({}, baseModel || {});
+		const wastagePct = Number(options.wastagePct || 0);
+		const stitchingOhPct = Number(options.stitchingOhPct || 0);
+		const headOfficeExpPct = Number(options.headOfficeExpPct || 0);
+		const bankChargesPct = Number(options.bankChargesPct || 0);
+		const cmtRateMap = data.cmt_rate_map || {};
+		const sourceRows = data.selected_profit_by_item || [];
+
+		const salesRows = sourceRows.map((row) => {
+			const itemCode = String(row.item_code || "").trim();
+			const qty = Number(row.qty || 0);
+			const cmtTotal = Number(((cmtRateMap[itemCode] || {}).cmt_total) || 0);
+			const cmtRate = Number(((cmtRateMap[itemCode] || {}).cmt_total_rate) || 0);
+			return {
+				item_code: itemCode,
+				item_group: row.item_group || "",
+				default_bom: row.default_bom || "",
+				label: itemCode || "-",
+				qty,
+				cmt_total: cmtTotal,
+				cmt_total_rate: cmtRate,
+				rate: cmtRate,
+				amount: qty * cmtRate,
+			};
+		});
+		const totalSales = salesRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+
 		model.materialGroups = [];
 		model.totalMaterialCost = 0;
-		model.wastageAmount = 0;
-		model.totalExpense =
-			Number(model.cmtLabourAmount || 0) +
-			Number(model.expenseClaimsAmount || 0) +
+		model.salesRows = salesRows;
+		model.totalSales = totalSales;
+		model.wastageAmount = totalSales * (wastagePct / 100);
+		model.stitchingOhAmount = totalSales * (stitchingOhPct / 100);
+		model.headOfficeExpAmount = totalSales * (headOfficeExpPct / 100);
+		model.bankChargesAmount = totalSales * (bankChargesPct / 100);
+		model.totalOverhead =
+			Number(model.wastageAmount || 0) +
 			Number(model.stitchingOhAmount || 0) +
 			Number(model.headOfficeExpAmount || 0) +
 			Number(model.bankChargesAmount || 0);
+		model.totalExpense =
+			Number(model.cmtLabourAmount || 0) +
+			Number(model.expenseClaimsAmount || 0) +
+			Number(model.totalOverhead || 0);
 		model.netProfit = Number(model.totalSales || 0) - Number(model.totalExpense || 0);
+		model.netMarginPct = model.totalSales ? ((model.netProfit * 100) / model.totalSales) : 0;
+
+		model.profitRows = salesRows.map((row) => {
+			const amount = Number(row.amount || 0);
+			const share = model.totalSales ? (amount / model.totalSales) : 0;
+			const estimatedCost = model.totalExpense * share;
+			const estimatedProfit = amount - estimatedCost;
+			return {
+				item_code: row.item_code || "-",
+				item_group: row.item_group || "",
+				qty: row.qty || 0,
+				cmt_total: row.cmt_total || 0,
+				cmt_total_rate: row.cmt_total_rate || 0,
+				default_bom: row.default_bom || "-",
+				sales_amount: amount,
+				estimated_cost: estimatedCost,
+				estimated_profit: estimatedProfit,
+				margin_pct: amount ? ((estimatedProfit * 100) / amount) : 0,
+			};
+		});
+		model.itemGroupSummary = this.buildItemGroupSummaryFromProfitRows(model.profitRows);
 		return model;
+	}
+
+	buildItemGroupSummaryFromProfitRows(rows) {
+		const grouped = {};
+		for (const row of rows || []) {
+			const itemGroup = String(row.item_group || "Unclassified").trim() || "Unclassified";
+			if (!grouped[itemGroup]) {
+				grouped[itemGroup] = {
+					item_group: itemGroup,
+					qty: 0,
+					sales_amount: 0,
+					estimated_cost: 0,
+					estimated_profit: 0,
+					margin_pct: 0,
+				};
+			}
+			grouped[itemGroup].qty += Number(row.qty || 0);
+			grouped[itemGroup].sales_amount += Number(row.sales_amount || 0);
+			grouped[itemGroup].estimated_cost += Number(row.estimated_cost || 0);
+			grouped[itemGroup].estimated_profit += Number(row.estimated_profit || 0);
+		}
+		return Object.values(grouped)
+			.map((row) => {
+				const sales = Number(row.sales_amount || 0);
+				row.margin_pct = sales ? ((Number(row.estimated_profit || 0) * 100) / sales) : 0;
+				return row;
+			})
+			.sort((a, b) => String(a.item_group || "").localeCompare(String(b.item_group || "")));
+	}
+
+	renderCmtSalesItemsTable(rows) {
+		if (!rows.length) {
+			return `<div class="otr-pl-empty">${__("No sales item rows found.")}</div>`;
+		}
+		const body = rows.map((row) => `
+			<tr>
+				<td>${frappe.utils.escape_html(row.item_code || row.label || "-")}</td>
+				<td class="text-right">${this.formatNumber(row.qty || 0)}</td>
+				<td class="text-right">${this.formatRate(row.cmt_total || 0)}</td>
+				<td class="text-right">${this.formatRate(row.cmt_total_rate || 0)}</td>
+				<td class="text-right">${this.formatCurrency((Number(row.qty || 0) * Number(row.cmt_total_rate || 0)) || 0)}</td>
+			</tr>
+		`).join("");
+		return this.wrapTable(`
+			<thead><tr><th>${__("Item")}</th><th class="text-right">${__("Qty")}</th><th class="text-right">${__("custom_cmt_total")}</th><th class="text-right">${__("custom_cmt_total_rate")}</th><th class="text-right">${__("Amount")}</th></tr></thead>
+			<tbody>${body}</tbody>
+		`);
 	}
 
 	bindPlStatementInteractions($container) {
@@ -1635,6 +1752,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 
 	renderGroupedStatementTable(model, percentages = {}) {
 		const hideRawMaterials = !!percentages.hideRawMaterials;
+		const showCmtRates = !!percentages.showCmtRates;
 		const overheadRows = [
 			{ label: __("Wastage"), percentage: percentages.wastagePct || 0, amount: model.wastageAmount },
 			{ label: __("Stitching OH %age"), percentage: percentages.stitchingOhPct || 0, amount: model.stitchingOhAmount },
@@ -1645,11 +1763,17 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 
 		const rows = [];
 		const dashCell = `<span class="otr-pl-cell-dash">-</span>`;
+		const extraRateHeader = showCmtRates
+			? `<th class="text-right">${__("custom_cmt_total")}</th><th class="text-right">${__("custom_cmt_total_rate")}</th>`
+			: "";
+		const extraRateDashCells = showCmtRates
+			? `<td class="text-right">${dashCell}</td><td class="text-right">${dashCell}</td>`
+			: "";
 		const sectionRow = (label) => `
 			<tr class="otr-pl-row-section">
 				<td><strong>${frappe.utils.escape_html(label)}</strong></td>
 				<td class="text-right">${dashCell}</td>
-				<td class="text-right">${dashCell}</td>
+				${extraRateDashCells || `<td class="text-right">${dashCell}</td>`}
 				<td class="text-right">${dashCell}</td>
 				<td class="text-right">${dashCell}</td>
 			</tr>
@@ -1661,7 +1785,10 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				<tr class="otr-pl-row-detail">
 					<td>${frappe.utils.escape_html(row.label || "-")}</td>
 					<td class="text-right">${row.qty ? this.formatNumber(row.qty) : "-"}</td>
-					<td class="text-right">${row.rate ? this.formatRate(row.rate) : "-"}</td>
+					${showCmtRates
+						? `<td class="text-right">${this.formatRate(row.cmt_total || 0)}</td><td class="text-right">${this.formatRate(row.cmt_total_rate || 0)}</td>`
+						: `<td class="text-right">${row.rate ? this.formatRate(row.rate) : "-"}</td>`
+					}
 					<td class="text-right">${this.formatCurrency(row.amount || 0)}</td>
 					<td class="text-right">${dashCell}</td>
 				</tr>
@@ -1671,7 +1798,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			<tr class="otr-pl-row-total">
 				<td>${__("Total Sales")}</td>
 				<td class="text-right">${dashCell}</td>
-				<td class="text-right">${dashCell}</td>
+				${extraRateDashCells || `<td class="text-right">${dashCell}</td>`}
 				<td class="text-right otr-pl-cell-amount-strong">${this.formatCurrency(model.totalSales)}</td>
 				<td class="text-right">${this.formatCurrency(model.totalSales)}</td>
 			</tr>
@@ -1684,7 +1811,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 					<tr class="otr-pl-row-group-light">
 						<td><button type="button" class="otr-pl-toggle" data-group-key="${frappe.utils.escape_html(group.key)}" aria-expanded="false"><span class="otr-pl-toggle-icon">+</span></button><strong>${frappe.utils.escape_html(group.label || "-")}</strong></td>
 						<td class="text-right">${group.qty ? this.formatNumber(group.qty) : "-"}</td>
-						<td class="text-right">${dashCell}</td>
+						${extraRateDashCells || `<td class="text-right">${dashCell}</td>`}
 						<td class="text-right otr-pl-cell-amount-strong">${this.formatCurrency(group.amount || 0)}</td>
 						<td class="text-right">${dashCell}</td>
 					</tr>
@@ -1694,7 +1821,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 						<tr class="otr-pl-row-detail otr-pl-row-hidden" data-parent-group="${frappe.utils.escape_html(group.key)}">
 							<td>${frappe.utils.escape_html(item.label || "-")}</td>
 							<td class="text-right">${item.qty ? this.formatNumber(item.qty) : "-"}</td>
-							<td class="text-right">${item.rate ? this.formatRate(item.rate) : "-"}</td>
+							${extraRateDashCells || `<td class="text-right">${item.rate ? this.formatRate(item.rate) : "-"}</td>`}
 							<td class="text-right">${this.formatCurrency(item.amount || 0)}</td>
 							<td class="text-right">${dashCell}</td>
 						</tr>
@@ -1705,7 +1832,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				<tr class="otr-pl-row-total">
 					<td>${__("Total Raw Material")}</td>
 					<td class="text-right">${dashCell}</td>
-					<td class="text-right">${dashCell}</td>
+					${extraRateDashCells || `<td class="text-right">${dashCell}</td>`}
 					<td class="text-right otr-pl-cell-amount-strong">${this.formatCurrency(model.totalMaterialCost)}</td>
 					<td class="text-right">${this.formatCurrency(model.totalMaterialCost)}</td>
 				</tr>
@@ -1717,7 +1844,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			<tr class="otr-pl-row-indent">
 				<td>${__("CMT Labour Cost")}</td>
 				<td class="text-right">${dashCell}</td>
-				<td class="text-right">${dashCell}</td>
+				${extraRateDashCells || `<td class="text-right">${dashCell}</td>`}
 				<td class="text-right">${this.formatCurrency(model.cmtLabourAmount)}</td>
 				<td class="text-right">${dashCell}</td>
 			</tr>
@@ -1726,7 +1853,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			<tr class="otr-pl-row-indent">
 				<td>${__("Expense Claims")}</td>
 				<td class="text-right">${dashCell}</td>
-				<td class="text-right">${dashCell}</td>
+				${extraRateDashCells || `<td class="text-right">${dashCell}</td>`}
 				<td class="text-right">${this.formatCurrency(model.expenseClaimsAmount)}</td>
 				<td class="text-right">${dashCell}</td>
 			</tr>
@@ -1738,7 +1865,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				<tr class="otr-pl-row-indent">
 					<td>${frappe.utils.escape_html(`${row.label || "-"}${row.percentage ? ` (${this.formatPercent(row.percentage)})` : ""}`)}</td>
 					<td class="text-right">${dashCell}</td>
-					<td class="text-right">${dashCell}</td>
+					${extraRateDashCells || `<td class="text-right">${dashCell}</td>`}
 					<td class="text-right">${this.formatCurrency(row.amount || 0)}</td>
 					<td class="text-right">${dashCell}</td>
 				</tr>
@@ -1748,7 +1875,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			<tr class="otr-pl-row-total">
 				<td>${__("Total Estimated Overhead")}</td>
 				<td class="text-right">${dashCell}</td>
-				<td class="text-right">${dashCell}</td>
+				${extraRateDashCells || `<td class="text-right">${dashCell}</td>`}
 				<td class="text-right otr-pl-cell-amount-strong">${this.formatCurrency(totalOverhead)}</td>
 				<td class="text-right">${this.formatCurrency(totalOverhead)}</td>
 			</tr>
@@ -1759,7 +1886,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			<tr class="otr-pl-row-indent">
 				<td>${__("Sales Less Total Expense")}</td>
 				<td class="text-right">${dashCell}</td>
-				<td class="text-right">${dashCell}</td>
+				${extraRateDashCells || `<td class="text-right">${dashCell}</td>`}
 				<td class="text-right">${this.formatCurrency(model.totalExpense)}</td>
 				<td class="text-right">${this.formatCurrency(model.totalSales - model.totalExpense)}</td>
 			</tr>
@@ -1768,7 +1895,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			<tr class="otr-pl-row-indent">
 				<td>${__("Grand Total Expense")}</td>
 				<td class="text-right">${dashCell}</td>
-				<td class="text-right">${dashCell}</td>
+				${extraRateDashCells || `<td class="text-right">${dashCell}</td>`}
 				<td class="text-right">${this.formatCurrency(model.totalExpense)}</td>
 				<td class="text-right">${dashCell}</td>
 			</tr>
@@ -1777,7 +1904,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			<tr class="otr-pl-row-total">
 				<td>${__("Net Profit")}</td>
 				<td class="text-right">${dashCell}</td>
-				<td class="text-right">${dashCell}</td>
+				${extraRateDashCells || `<td class="text-right">${dashCell}</td>`}
 				<td class="text-right otr-pl-cell-amount-strong">${this.formatCurrency(model.netProfit)}</td>
 				<td class="text-right">${this.formatCurrency(model.netProfit)}</td>
 			</tr>
@@ -1788,7 +1915,7 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 				<tr>
 					<th>${__("Particular")}</th>
 					<th class="text-right">${__("Qty")}</th>
-					<th class="text-right">${__("Price/Rate")}</th>
+					${extraRateHeader || `<th class="text-right">${__("Price/Rate")}</th>`}
 					<th class="text-right">${__("Amount")}</th>
 					<th class="text-right">${__("Total")}</th>
 				</tr>
@@ -1870,20 +1997,62 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		if (!rows.length) {
 			return `<div class="otr-pl-empty">${__("No profit rows found.")}</div>`;
 		}
+		const hasCmtColumns = rows.some((row) => row && (row.cmt_total_rate != null || row.cmt_total != null));
+		if (hasCmtColumns) {
+			const body = rows.map((row) => `
+				<tr>
+					<td>${frappe.utils.escape_html(row.item_code || "-")}</td>
+					<td>${frappe.utils.escape_html(row.item_group || "-")}</td>
+					<td class="text-right">${this.formatNumber(row.qty || 0)}</td>
+					<td class="text-right">${this.formatRate(row.cmt_total || 0)}</td>
+					<td class="text-right">${this.formatRate(row.cmt_total_rate || 0)}</td>
+					<td class="text-right">${this.formatCurrency(row.sales_amount || 0)}</td>
+					<td class="text-right">${this.formatCurrency(row.estimated_cost || 0)}</td>
+					<td class="text-right">${this.formatCurrency(row.estimated_profit || 0)}</td>
+					<td class="text-right">${this.formatPercent(row.margin_pct || 0)}</td>
+				</tr>
+			`).join("");
+			const totals = rows.reduce((acc, row) => {
+				acc.qty += Number(row.qty || 0);
+				acc.sales += Number(row.sales_amount || 0);
+				acc.expenses += Number(row.estimated_cost || 0);
+				acc.profit += Number(row.estimated_profit || 0);
+				return acc;
+			}, { qty: 0, sales: 0, expenses: 0, profit: 0 });
+			const totalMargin = totals.sales ? ((totals.profit * 100) / totals.sales) : 0;
+			return this.wrapTable(`
+				<thead><tr><th>${__("Item")}</th><th>${__("Item Group")}</th><th class="text-right">${__("Qty")}</th><th class="text-right">${__("custom_cmt_total")}</th><th class="text-right">${__("custom_cmt_total_rate")}</th><th class="text-right">${__("Sales")}</th><th class="text-right">${__("Expenses")}</th><th class="text-right">${__("Profit")}</th><th class="text-right">${__("Margin")}</th></tr></thead>
+				<tbody>
+					${body}
+					<tr class="otr-pl-row-total">
+						<td>${__("Total")}</td>
+						<td><span class="otr-pl-cell-dash">-</span></td>
+						<td class="text-right">${this.formatNumber(totals.qty)}</td>
+						<td class="text-right"><span class="otr-pl-cell-dash">-</span></td>
+						<td class="text-right"><span class="otr-pl-cell-dash">-</span></td>
+						<td class="text-right">${this.formatCurrency(totals.sales)}</td>
+						<td class="text-right">${this.formatCurrency(totals.expenses)}</td>
+						<td class="text-right">${this.formatCurrency(totals.profit)}</td>
+						<td class="text-right">${this.formatPercent(totalMargin)}</td>
+					</tr>
+				</tbody>
+			`);
+		}
+
 		const body = rows.map((row) => `
 			<tr>
 				<td>${frappe.utils.escape_html(row.item_code || "-")}</td>
-					<td>${frappe.utils.escape_html(row.item_group || "-")}</td>
+				<td>${frappe.utils.escape_html(row.item_group || "-")}</td>
 				<td class="text-right">${this.formatNumber(row.qty || 0)}</td>
 				<td>${frappe.utils.escape_html(row.default_bom || "-")}</td>
 				<td class="text-right">${this.formatCurrency(row.sales_amount || 0)}</td>
 				<td class="text-right">${this.formatCurrency(row.estimated_cost || 0)}</td>
 				<td class="text-right">${this.formatCurrency(row.estimated_profit || 0)}</td>
-					<td class="text-right">${this.formatPercent(row.margin_pct || 0)}</td>
+				<td class="text-right">${this.formatPercent(row.margin_pct || 0)}</td>
 			</tr>
 		`).join("");
 		return this.wrapTable(`
-				<thead><tr><th>${__("Item")}</th><th>${__("Item Group")}</th><th class="text-right">${__("Qty")}</th><th>${__("BOM")}</th><th class="text-right">${__("Sales")}</th><th class="text-right">${__("Cost")}</th><th class="text-right">${__("Profit")}</th><th class="text-right">${__("Margin")}</th></tr></thead>
+			<thead><tr><th>${__("Item")}</th><th>${__("Item Group")}</th><th class="text-right">${__("Qty")}</th><th>${__("BOM")}</th><th class="text-right">${__("Sales")}</th><th class="text-right">${__("Cost")}</th><th class="text-right">${__("Profit")}</th><th class="text-right">${__("Margin")}</th></tr></thead>
 			<tbody>${body}</tbody>
 		`);
 	}
@@ -1893,12 +2062,11 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			+ Number(model.stitchingOhAmount || 0)
 			+ Number(model.headOfficeExpAmount || 0)
 			+ Number(model.bankChargesAmount || 0);
+		const hideRawMaterials = !!percentages.hideRawMaterials;
 
 		const rows = [
 			{ type: "section", label: __("Sales Items") },
 			{ label: __("Total Sales"), amount: model.totalSales },
-			{ type: "section", label: __("Raw Materials") },
-			{ label: __("Total Raw Material"), amount: model.totalMaterialCost },
 			{ type: "section", label: __("Expenses") },
 			{ label: __("CMT Labour Cost"), amount: model.cmtLabourAmount },
 			{ label: __("Expense Claims"), amount: model.expenseClaimsAmount },
@@ -1912,6 +2080,12 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 			{ label: __("Grand Total Expense"), amount: model.totalExpense, total: 1 },
 			{ label: __("Net Profit"), amount: model.netProfit, total: 1 },
 		];
+		if (!hideRawMaterials) {
+			rows.splice(2, 0,
+				{ type: "section", label: __("Raw Materials") },
+				{ label: __("Total Raw Material"), amount: model.totalMaterialCost },
+			);
+		}
 
 		const body = rows.map((row) => {
 			if (row.type === "section") {
@@ -2093,16 +2267,41 @@ window.order_tracking_report.FinanicalsPage = class FinanicalsPage {
 		if (!rows.length) {
 			return `<div class="otr-pl-empty">${__("No labour rows found.")}</div>`;
 		}
-		const body = rows.map((row) => `
-			<tr>
-				<td>${frappe.utils.escape_html(row.employee || row.name1 || "-")}</td>
-				<td>${frappe.utils.escape_html(row.product || "-")}</td>
-				<td>${frappe.utils.escape_html(row.process_type || "-")}</td>
-				<td class="text-right">${this.formatNumber(row.qty || 0)}</td>
-				<td class="text-right">${this.formatCurrency(row.rate || 0)}</td>
-				<td class="text-right">${this.formatCurrency(row.labour_cost || 0)}</td>
-			</tr>
-		`).join("");
+		const grouped = {};
+		for (const row of rows) {
+			const employee = (row.employee || row.name1 || "-").trim() || "-";
+			if (!grouped[employee]) grouped[employee] = [];
+			grouped[employee].push(row);
+		}
+		let idx = 0;
+		const body = Object.keys(grouped).sort().map((employee) => {
+			idx += 1;
+			const groupKey = `labour_emp_${idx}`;
+			const empRows = grouped[employee] || [];
+			const empQty = empRows.reduce((s, r) => s + Number(r.qty || 0), 0);
+			const empCost = empRows.reduce((s, r) => s + Number(r.labour_cost || 0), 0);
+			const header = `
+				<tr class="otr-pl-row-group-light">
+					<td><button type="button" class="otr-pl-toggle" data-group-key="${frappe.utils.escape_html(groupKey)}" aria-expanded="false"><span class="otr-pl-toggle-icon">+</span></button><strong>${frappe.utils.escape_html(employee)}</strong></td>
+					<td><span class="otr-pl-cell-dash">-</span></td>
+					<td><span class="otr-pl-cell-dash">-</span></td>
+					<td class="text-right">${this.formatNumber(empQty)}</td>
+					<td class="text-right"><span class="otr-pl-cell-dash">-</span></td>
+					<td class="text-right">${this.formatCurrency(empCost)}</td>
+				</tr>
+			`;
+			const details = empRows.map((row) => `
+				<tr class="otr-pl-row-detail otr-pl-row-hidden" data-parent-group="${frappe.utils.escape_html(groupKey)}">
+					<td>${frappe.utils.escape_html(row.employee || row.name1 || "-")}</td>
+					<td>${frappe.utils.escape_html(row.product || "-")}</td>
+					<td>${frappe.utils.escape_html(row.process_type || "-")}</td>
+					<td class="text-right">${this.formatNumber(row.qty || 0)}</td>
+					<td class="text-right">${this.formatCurrency(row.rate || 0)}</td>
+					<td class="text-right">${this.formatCurrency(row.labour_cost || 0)}</td>
+				</tr>
+			`).join("");
+			return header + details;
+		}).join("");
 		return this.wrapTable(`
 			<thead><tr><th>${__("Employee")}</th><th>${__("Item")}</th><th>${__("Process")}</th><th class="text-right">${__("Qty")}</th><th class="text-right">${__("Rate")}</th><th class="text-right">${__("Labour Cost")}</th></tr></thead>
 			<tbody>
