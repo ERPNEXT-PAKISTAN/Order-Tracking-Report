@@ -603,6 +603,7 @@ def ensure_sales_order_live_shortcuts():
     ensure_order_tracking_workspace()
     ensure_order_tracking_workspace_shortcuts()
     ensure_order_tracking_reports_workspace_shortcuts()
+    ensure_order_tracking_desktop_icons()
 
 
 def _ensure_workspace(
@@ -613,6 +614,7 @@ def _ensure_workspace(
     public=1,
     sequence_id=None,
     parent_page="",
+    workspace_type="Workspace",
 ):
     title = title or workspace_name
     changed = False
@@ -627,7 +629,7 @@ def _ensure_workspace(
                 "app": "order_tracking_report",
                 "icon": icon,
                 "indicator_color": "blue",
-                "type": "Workspace",
+                "type": workspace_type,
                 "public": public,
                 "sequence_id": sequence_id or 0,
                 "parent_page": parent_page,
@@ -643,7 +645,7 @@ def _ensure_workspace(
         "module": module,
         "app": "order_tracking_report",
         "icon": icon,
-        "type": "Workspace",
+        "type": workspace_type,
         "is_hidden": 0,
         "parent_page": parent_page,
     }
@@ -660,6 +662,107 @@ def _ensure_workspace(
 
     if changed:
         frappe.clear_document_cache("Workspace", workspace_name)
+
+    _unhide_workspace_for_all_users(workspace_name)
+    _clear_workspace_roles_for_public(workspace_name, public)
+
+
+def _clear_workspace_roles_for_public(workspace_name, public):
+    if public != 1:
+        return
+    if not frappe.db.exists("Workspace", workspace_name):
+        return
+    if not frappe.db.exists("DocType", "Workspace Link"):
+        return
+
+    role_rows = frappe.get_all(
+        "Workspace Link",
+        filters={
+            "parent": workspace_name,
+            "parenttype": "Workspace",
+            "parentfield": "roles",
+        },
+        pluck="name",
+    )
+    if not role_rows:
+        return
+
+    for row_name in role_rows:
+        frappe.delete_doc("Workspace Link", row_name, ignore_permissions=True, force=True)
+    frappe.clear_document_cache("Workspace", workspace_name)
+
+
+def _ensure_desktop_icon(
+    label,
+    link_to,
+    icon="folder-normal",
+    idx=90,
+    app="order_tracking_report",
+):
+    if not frappe.db.exists("Workspace", link_to):
+        return
+
+    values = {
+        "doctype": "Desktop Icon",
+        "label": label,
+        "app": app,
+        "icon_type": "Link",
+        "link_type": "Workspace Sidebar",
+        "link_to": link_to,
+        "sidebar": link_to,
+        "icon": icon,
+        "idx": idx,
+        "hidden": 0,
+        "restrict_removal": 0,
+        "standard": 0,
+    }
+
+    if not frappe.db.exists("Desktop Icon", label):
+        frappe.get_doc(values).insert(ignore_permissions=True)
+        return
+
+    changed = False
+    fields_to_read = [field for field in values.keys() if field != "doctype"]
+    current = frappe.db.get_value("Desktop Icon", label, fields_to_read, as_dict=True) or {}
+    for fieldname, value in values.items():
+        if fieldname == "doctype":
+            continue
+        if current.get(fieldname) != value:
+            frappe.db.set_value("Desktop Icon", label, fieldname, value, update_modified=False)
+            changed = True
+
+    if changed:
+        frappe.clear_cache(user="Administrator")
+
+
+def ensure_order_tracking_desktop_icons():
+    _ensure_desktop_icon(
+        label="Order Tracking",
+        link_to="Order Tracking",
+        icon="branch",
+        idx=84,
+    )
+    _ensure_desktop_icon(
+        label="Order Tracking Reports",
+        link_to="Order Tracking Reports",
+        icon="report",
+        idx=85,
+    )
+
+
+def _unhide_workspace_for_all_users(workspace_name):
+    if not frappe.db.exists("Workspace", workspace_name):
+        return
+    if not frappe.db.exists("DocType", "Workspace Hidden"):
+        return
+
+    hidden_rows = frappe.get_all(
+        "Workspace Hidden",
+        filters={"workspace_name": workspace_name},
+        pluck="name",
+    )
+    for row_name in hidden_rows:
+        frappe.delete_doc("Workspace Hidden", row_name, ignore_permissions=True, force=True)
 
 
 def _ensure_workspace_shortcut(workspace_name, label, shortcut_type, link_to, color):
@@ -888,6 +991,7 @@ def ensure_order_tracking_workspace():
         icon="branch",
         sequence_id=8.1,
         parent_page="",
+        workspace_type="Module",
     )
 
 
@@ -917,6 +1021,7 @@ def ensure_order_tracking_reports_workspace_shortcuts():
         icon="report",
         sequence_id=8.2,
         parent_page="",
+        workspace_type="Module",
     )
 
     # Sales Order View action shortcuts (best route equivalent for workspace)

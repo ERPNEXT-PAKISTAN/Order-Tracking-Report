@@ -1,30 +1,80 @@
 {
  "app": "order_tracking_report",
  "charts": [],
- "content": "[\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Refresh Detail Status\"\n  },\n  \"id\": \"otrrpt0000\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Sales Order Live\"\n  },\n  \"id\": \"otrrpt0001\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Live Work Order\"\n  },\n  \"id\": \"otrrpt0002\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"All Related Links\"\n  },\n  \"id\": \"otrrpt0003\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Sales Order Status Board\"\n  },\n  \"id\": \"otrrpt0004\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Finanicals\"\n  },\n  \"id\": \"otrrpt0005\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"PL by Order\"\n  },\n  \"id\": \"otrrpt0006\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Daily Operation Page\"\n  },\n  \"id\": \"otrrpt0007\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Purchase Order Updated Status\"\n  },\n  \"id\": \"otrrpt0008\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Purchase Order Status Report\"\n  },\n  \"id\": \"otrrpt0009\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Sales Order Status Report\"\n  },\n  \"id\": \"otrrpt0010\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Sales Trend Analysis Report\"\n  },\n  \"id\": \"otrrpt0011\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Stock Report\"\n  },\n  \"id\": \"otrrpt0012\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Daily Operation Report\"\n  },\n  \"id\": \"otrrpt0013\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Supplier Wise Purchases Detail\"\n  },\n  \"id\": \"otrrpt0014\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Consumption Report\"\n  },\n  \"id\": \"otrrpt0015\",\n  \"type\": \"shortcut\"\n }\n]",
- "creation": "2026-04-24 01:00:00.000000",
+ "content": "[\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Purchase Order Updated Status\"\n  },\n  \"id\": \"otrrpt0001\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Purchase Order Status Report\"\n  },\n  \"id\": \"otrrpt0002\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Sales Order Status Report\"\n  },\n  \"id\": \"otrrpt0003\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Stock Report\"\n  },\n  \"id\": \"otrrpt0004\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Supplier Wise Purchases Detail\"\n  },\n  \"id\": \"otrrpt0005\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Consumption Report\"\n  },\n  \"id\": \"otrrpt0006\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Daily Operation Report\"\n  },\n  \"id\": \"otrrpt0007\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Refresh Detail Status\"\n  },\n  \"id\": \"9e6220d9a3\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Sales Order Live\"\n  },\n  \"id\": \"4d12b9e7b4\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Live Work Order\"\n  },\n  \"id\": \"51bb297a66\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"All Related Links\"\n  },\n  \"id\": \"3361325634\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Sales Order Status Board\"\n  },\n  \"id\": \"fe4c124133\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Finanicals\"\n  },\n  \"id\": \"8077f98191\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"PL by Order\"\n  },\n  \"id\": \"994f71db9e\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Daily Operation Page\"\n  },\n  \"id\": \"978bca0c3f\",\n  \"type\": \"shortcut\"\n },\n {\n  \"data\": {\n   \"col\": 3,\n   \"shortcut_name\": \"Sales Trend Analysis Report\"\n  },\n  \"id\": \"88a36497b6\",\n  \"type\": \"shortcut\"\n }\n]",
+ "creation": "2026-04-24 01:00:00",
  "custom_blocks": [],
  "docstatus": 0,
  "doctype": "Workspace",
  "hide_custom": 0,
- "icon": "report",
+ "icon": "align-end-horizontal",
  "idx": 0,
  "indicator_color": "blue",
  "is_hidden": 0,
  "label": "Order Tracking Reports",
  "link_type": "DocType",
  "links": [],
- "modified": "2026-04-24 01:00:00.000000",
- "modified_by": "Administrator",
+ "modified": "2026-04-27 18:23:23.266625",
+ "modified_by": "techcraft986@gmail.com",
  "module": "Order Tracking Report",
  "name": "Order Tracking Reports",
  "number_cards": [],
  "owner": "Administrator",
+ "parent_page": "",
  "public": 1,
  "quick_lists": [],
  "roles": [],
- "sequence_id": 0.0,
+ "sequence_id": 8.2,
  "shortcuts": [
+  {
+   "color": "yellow",
+   "label": "Purchase Order Updated Status",
+   "link_to": "Purchase Order updated Status",
+   "report_ref_doctype": "Purchase Order",
+   "type": "Report"
+  },
+  {
+   "color": "blue",
+   "label": "Purchase Order Status Report",
+   "link_to": "Purchase Order Status Report",
+   "report_ref_doctype": "Purchase Order",
+   "type": "Report"
+  },
+  {
+   "color": "orange",
+   "label": "Sales Order Status Report",
+   "link_to": "Sales Order Status Report",
+   "report_ref_doctype": "Sales Order",
+   "type": "Report"
+  },
+  {
+   "color": "green",
+   "label": "Stock Report",
+   "link_to": "Stock Report",
+   "report_ref_doctype": "Stock Ledger Entry",
+   "type": "Report"
+  },
+  {
+   "color": "cyan",
+   "label": "Supplier Wise Purchases Detail",
+   "link_to": "Supplier Wise Purchases Detail",
+   "report_ref_doctype": "Purchase Order",
+   "type": "Report"
+  },
+  {
+   "color": "grey",
+   "label": "Consumption Report",
+   "link_to": "Consumption Report",
+   "report_ref_doctype": "Stock Entry",
+   "type": "Report"
+  },
+  {
+   "color": "purple",
+   "label": "Daily Operation Report",
+   "link_to": "Daily Operation Report",
+   "report_ref_doctype": "Daily Production",
+   "type": "Report"
+  },
   {
    "color": "blue",
    "label": "Refresh Detail Status",
@@ -74,54 +124,13 @@
    "type": "Page"
   },
   {
-   "color": "yellow",
-   "label": "Purchase Order Updated Status",
-   "link_to": "Purchase Order updated Status",
-   "type": "Report"
-  },
-  {
-   "color": "blue",
-   "label": "Purchase Order Status Report",
-   "link_to": "Purchase Order Status Report",
-   "type": "Report"
-  },
-  {
-   "color": "orange",
-   "label": "Sales Order Status Report",
-   "link_to": "Sales Order Status Report",
-   "type": "Report"
-  },
-  {
    "color": "purple",
    "label": "Sales Trend Analysis Report",
    "link_to": "Sales Trend Analysis Report",
-   "type": "Report"
-  },
-  {
-   "color": "green",
-   "label": "Stock Report",
-   "link_to": "Stock Report",
-   "type": "Report"
-  },
-  {
-   "color": "teal",
-   "label": "Daily Operation Report",
-   "link_to": "Daily Operation Report",
-   "type": "Report"
-  },
-  {
-   "color": "cyan",
-   "label": "Supplier Wise Purchases Detail",
-   "link_to": "Supplier Wise Purchases Detail",
-   "type": "Report"
-  },
-  {
-   "color": "grey",
-   "label": "Consumption Report",
-   "link_to": "Consumption Report",
+   "report_ref_doctype": "Sales Invoice",
    "type": "Report"
   }
  ],
  "title": "Order Tracking Reports",
- "type": "Workspace"
+ "type": "Module"
 }
