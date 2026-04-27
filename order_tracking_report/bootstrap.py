@@ -386,7 +386,7 @@ def ensure_order_tracking_reports():
     ensure_script_report("Purchase Order updated Status", "Purchase Order")
     ensure_script_report("Purchase Order Status Report", "Purchase Order")
     ensure_script_report("Sales Order Status Report", "Sales Order")
-    ensure_script_report("Sales Trend Analysis Report", "Sales Order")
+    ensure_script_report("Sales Trend Analysis Report", "Sales Invoice")
     ensure_script_report("Stock Report", "Stock Ledger Entry")
     ensure_script_report("Supplier Wise Purchases Detail", "Purchase Order")
     ensure_script_report("Consumption Report", "Stock Entry")

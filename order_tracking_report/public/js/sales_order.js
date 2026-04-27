@@ -172,7 +172,6 @@ frappe.ui.form.on("Sales Order", {
       frappe.route_options = {
         company: frm.doc.company || "",
         customer: frm.doc.customer || "",
-        sales_order: frm.doc.name || "",
       };
       frappe.set_route("query-report", "Sales Trend Analysis Report");
     }, __("View"));
