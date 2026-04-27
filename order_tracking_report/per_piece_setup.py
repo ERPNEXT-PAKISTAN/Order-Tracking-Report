@@ -10905,19 +10905,20 @@ def _update_print_format(results: list[str]) -> None:
 		results.append("No change: Print Format 'Per Piece Print'")
 
 
-def _update_web_page(results: list[str]) -> None:
-	_upsert_doc(
-		"Web Page",
-		"per-piece-report",
-		{
-			"title": "Per Piece Salary Report",
-			"route": "per-piece-report",
-			"published": 1,
-			"content_type": "HTML",
-			"main_section_html": WEB_PAGE_HTML,
-		},
-		results,
-	)
+def _remove_legacy_web_page(results: list[str]) -> None:
+	route_names = frappe.get_all("Web Page", filters={"route": "per-piece-report"}, pluck="name") or []
+	name_matches = ["per-piece-report"] if frappe.db.exists("Web Page", "per-piece-report") else []
+	to_delete = sorted(set(route_names + name_matches))
+	if not to_delete:
+		results.append("No change: legacy Web Page 'per-piece-report' not found")
+		return
+
+	for page_name in to_delete:
+		try:
+			frappe.delete_doc("Web Page", page_name, ignore_permissions=True, force=True)
+			results.append(f"Removed: legacy Web Page '{page_name}'")
+		except Exception:
+			results.append(f"Skipped: could not remove legacy Web Page '{page_name}'")
 
 
 def _ensure_core_doctypes(results: list[str]) -> None:
@@ -11408,7 +11409,7 @@ def apply() -> list[str]:
 		},
 		results,
 	)
-	_update_web_page(results)
+	_remove_legacy_web_page(results)
 	_update_print_format(results)
 
 	frappe.clear_cache()

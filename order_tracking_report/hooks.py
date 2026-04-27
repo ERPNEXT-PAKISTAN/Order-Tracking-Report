@@ -11,54 +11,6 @@ fixtures = [
 		"filters": [["dt", "=", "Sales Order"]],
 	},
 	{
-		"dt": "Custom HTML Block",
-		"filters": [["name", "in", ["Advances", "Live Work Order", "Work Order"]]],
-	},
-	{
-		"dt": "Web Page",
-		"filters": [["name", "in", ["finanicals", "per-piece-report"]]],
-	},
-	{
-		"dt": "Property Setter",
-		"filters": [["name", "in", ["Per Piece Salary-po_number-reqd", "Sales Order-main-0"]]],
-	},
-	{
-		"dt": "Print Format",
-		"filters": [["name", "in", ["Per Piece Print", "Sales Order Contract", "Sales Order Contract with Comment"]]],
-	},
-	{
-		"dt": "Client Script",
-		"filters": [["name", "in", ["Per Piece Salary Update Child"]]],
-	},
-	{
-		"dt": "Report",
-		"filters": [[
-			"name",
-			"in",
-			[
-				"Per Piece Query Report Simple",
-				"Per Piece Salary Report",
-				"Purchase Order updated Status",
-				"Purchase Order Status Report",
-				"Sales Order Status Report",
-				"Stock Report",
-				"Supplier Wise Purchases Detail",
-				"Consumption Report",
-				"Daily Operation Report",
-			],
-		]],
-	},
-	{
-		"dt": "Server Script",
-		"filters": [["name", "in", ["Work Order", "live_production_api", "fin_sight_dashboard_api"]]],
-	},
-]
-fixtures = [
-	{
-		"dt": "Custom Field",
-		"filters": [["dt", "=", "Sales Order"]],
-	},
-	{
 		"dt": "Custom Field",
 		"filters": [
 			["dt", "in", ["Per Piece", "Item", "Salary Slip"]],
