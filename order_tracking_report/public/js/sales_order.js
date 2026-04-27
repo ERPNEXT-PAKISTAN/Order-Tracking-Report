@@ -168,6 +168,15 @@ frappe.ui.form.on("Sales Order", {
       frappe.set_route("query-report", "Sales Order Status Report");
     }, __("View"));
 
+    frm.add_custom_button(__("Sales Trend Analysis Report"), () => {
+      frappe.route_options = {
+        company: frm.doc.company || "",
+        customer: frm.doc.customer || "",
+        sales_order: frm.doc.name || "",
+      };
+      frappe.set_route("query-report", "Sales Trend Analysis Report");
+    }, __("View"));
+
     frm.add_custom_button(__("Stock Report"), () => {
       frappe.route_options = {
         company: frm.doc.company || "",
