@@ -701,6 +701,9 @@ def _ensure_desktop_icon(
 ):
     if not frappe.db.exists("Workspace", link_to):
         return
+    _ensure_workspace_sidebar_for_workspace(link_to, icon, app)
+    if not frappe.db.exists("Workspace Sidebar", link_to):
+        return
 
     values = {
         "doctype": "Desktop Icon",
@@ -733,6 +736,34 @@ def _ensure_desktop_icon(
 
     if changed:
         frappe.clear_cache(user="Administrator")
+
+
+def _ensure_workspace_sidebar_for_workspace(workspace_name, icon="folder-normal", app="order_tracking_report"):
+    if not frappe.db.exists("Workspace", workspace_name):
+        return
+    if frappe.db.exists("Workspace Sidebar", workspace_name):
+        return
+
+    doc = frappe.get_doc(
+        {
+            "doctype": "Workspace Sidebar",
+            "title": workspace_name,
+            "header_icon": icon,
+            "app": app,
+            "standard": 0,
+            "items": [
+                {
+                    "doctype": "Workspace Sidebar Item",
+                    "label": "Home",
+                    "link_to": workspace_name,
+                    "link_type": "Workspace",
+                    "type": "Link",
+                    "idx": 1,
+                }
+            ],
+        }
+    )
+    doc.insert(ignore_permissions=True)
 
 
 def ensure_order_tracking_desktop_icons():
