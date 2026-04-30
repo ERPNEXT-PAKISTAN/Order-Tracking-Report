@@ -10593,6 +10593,29 @@ def _ensure_custom_field(
 	no_copy: int = 1,
 	allow_fieldtype_override: int = 0,
 ) -> None:
+	# Cross-app safety: if field already exists directly on DocType, do not create/update
+	# a Custom Field with the same name (avoids duplicate-field migrate failures).
+	try:
+		meta = frappe.get_meta(doctype)
+		if meta and meta.has_field(fieldname):
+			docfield_name = frappe.db.get_value(
+				"DocField",
+				{"parent": doctype, "parenttype": "DocType", "fieldname": fieldname},
+				"name",
+			)
+			if docfield_name:
+				existing_cf = frappe.db.get_value(
+					"Custom Field", {"dt": doctype, "fieldname": fieldname}, "name"
+				)
+				if existing_cf:
+					frappe.delete_doc("Custom Field", existing_cf, ignore_permissions=True, force=1)
+					results.append(f"Deleted duplicate: Custom Field '{doctype}.{fieldname}'")
+				else:
+					results.append(f"No change: Field '{doctype}.{fieldname}' exists on DocType")
+				return
+	except Exception:
+		pass
+
 	existing = frappe.db.get_value("Custom Field", {"dt": doctype, "fieldname": fieldname}, "name")
 	payload = {
 		"dt": doctype,
