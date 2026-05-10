@@ -13,24 +13,11 @@ fixtures = [
 	{
 		"dt": "Custom Field",
 		"filters": [
-			["dt", "in", ["Per Piece", "Item", "Salary Slip"]],
+			["dt", "in", ["Item", "Salary Slip"]],
 			[
 				"fieldname",
 				"in",
 				[
-					# Per Piece (child table) – JV & payment tracking
-					"jv_status",
-					"jv_entry_no",
-					"jv_line_remark",
-					"booked_amount",
-					"paid_amount",
-					"unpaid_amount",
-					"payment_status",
-					"payment_jv_no",
-					"payment_refs",
-					"payment_line_remark",
-					"sales_order",
-					"process_size",
 					# Item – used by Overtime child table
 					"custom_working_hours",
 					"custom_target_value",
@@ -75,8 +62,6 @@ fixtures = [
 			"name",
 			"in",
 			[
-				"Per Piece Query Report Simple",
-				"Per Piece Salary Report",
 				"Purchase Order updated Status",
 				"Purchase Order Status Report",
 				"Sales Order Status Report",
@@ -98,13 +83,6 @@ fixtures = [
 					"Work Order",
 					"live_production_api",
 					"fin_sight_dashboard_api",
-					# Per Piece Payroll
-					"create_per_piece_salary_entry",
-					"create_per_piece_salary_jv",
-					"cancel_per_piece_salary_jv",
-					"create_per_piece_salary_payment_jv",
-					"cancel_per_piece_salary_payment_jv",
-					"get_per_piece_salary_report",
 					# Overtime
 					"Get Overtime Report",
 					"Load Overtime Detail in Salary Slip (Child Table)",
@@ -121,8 +99,6 @@ fixtures = [
 				[
 					"Daily Overtime",
 					"Overtime",
-					"Per Piece",
-					"Per Piece Salary",
 					"Packing Item List Invoice",
 					"Packing Items List",
 				],
@@ -195,6 +171,10 @@ after_migrate = [
 	"order_tracking_report.bootstrap.ensure_sales_order_live_shortcuts",
 	"order_tracking_report.cleanup.remove_legacy_ui_scripts",
 	"order_tracking_report.cleanup.normalize_purchase_receipt_titles",
+]
+
+before_migrate = [
+	"order_tracking_report.install.before_migrate",
 ]
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
