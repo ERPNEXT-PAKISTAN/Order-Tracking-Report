@@ -44,9 +44,33 @@ If your server already has old UI scripts/fields, install is still safe:
 
 ### Update on Server (already installed)
 
-If `git pull origin main` fails with:
-`fatal: 'origin' does not appear to be a git repository`
-then app folder is not linked to remote yet. Run one-time setup:
+Routine update command (recommended):
+
+```bash
+cd /home/frappe/frappe-bench || exit 1
+
+# 0) backup before update
+bench --site YOUR_SITE backup --with-files
+
+# 1) pull latest code
+git -C apps/order_tracking_report status --short
+# only if status is not clean:
+git -C apps/order_tracking_report stash push -u -m "temp before update"
+
+git -C apps/order_tracking_report pull origin main
+git -C apps/order_tracking_report log -1 --oneline
+
+# 2) apply updates
+bench --site YOUR_SITE migrate
+bench --site YOUR_SITE clear-cache
+bench --site YOUR_SITE clear-website-cache
+bench build --app order_tracking_report
+bench restart
+```
+
+Where `YOUR_SITE` is your site name (for example `ah.frappe.my`).
+
+One-time Git setup (only if app folder is not a repo yet):
 
 ```bash
 cd /home/frappe/frappe-bench/apps/order_tracking_report
@@ -56,61 +80,9 @@ git fetch origin
 git checkout -B main origin/main
 ```
 
-Regular update command:
+### Quick Verification Checklist
 
-```bash
-cd /home/frappe/frappe-bench/apps/order_tracking_report
-git pull origin main
-cd /home/frappe/frappe-bench
-bench --site site1.local migrate
-bench --site site1.local clear-cache
-bench restart
-```
-
-Important:
-- Use `/home/frappe/frappe-bench` for all commands on this setup.
-
-### Clean Server Update Checklist
-
-Use this when updating the app on another server and you want Sales Order changes to load cleanly.
-
-1. Go to the app folder:
-
-```bash
-cd /home/frappe/frappe-bench/apps/order_tracking_report
-```
-
-2. Pull the latest code:
-
-```bash
-git pull origin main
-```
-
-3. Go back to bench folder:
-
-```bash
-cd /home/frappe/frappe-bench
-```
-
-4. Run migrate on the target site:
-
-```bash
-bench --site site1.local migrate
-```
-
-5. Clear cache:
-
-```bash
-bench --site site1.local clear-cache
-```
-
-6. Restart services:
-
-```bash
-bench restart
-```
-
-7. Verify in ERPNext:
+After update, verify in ERPNext:
 
 - Open `Sales Order`
 - Confirm custom fields are visible
@@ -118,27 +90,18 @@ bench restart
 - Confirm default ERPNext buttons like `Create` and `Update Items` still show
 - Confirm report and related Sales Order actions work as expected
 
-If the server is installing this app for the first time, use the Installation section above instead of only this checklist.
+If this is the first install on a server, use the Installation section above.
 
 ### Other Site Example (`site2.local`)
 
 ```bash
-cd /home/frappe/frappe-bench/apps/order_tracking_report
-git pull origin main
 cd /home/frappe/frappe-bench
+git -C apps/order_tracking_report pull origin main
 bench --site site2.local migrate
 bench --site site2.local clear-cache
+bench --site site2.local clear-website-cache
+bench build --app order_tracking_report
 bench restart
-```
-
-If this app folder is not linked to GitHub yet:
-
-```bash
-cd /home/frappe/frappe-bench/apps/order_tracking_report
-git init
-git remote add origin https://github.com/ERPNEXT-PAKISTAN/Order-Tracking-Report.git
-git fetch origin
-git checkout -B main origin/main
 ```
 
 ### Folder Schema (3 Sections)
