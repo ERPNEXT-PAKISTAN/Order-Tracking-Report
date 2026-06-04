@@ -11,28 +11,6 @@ fixtures = [
 		"filters": [["dt", "=", "Sales Order"]],
 	},
 	{
-		"dt": "Custom Field",
-		"filters": [
-			["dt", "in", ["Item", "Salary Slip"]],
-			[
-				"fieldname",
-				"in",
-				[
-					# Item – used by Overtime child table
-					"custom_working_hours",
-					"custom_target_value",
-					# Salary Slip – overtime tab & totals
-					"custom_overtime",
-					"custom_overtime_report",
-					"custom_section_break_phw71",
-					"custom_total_overtime_hours",
-					"custom_column_break_cca4z",
-					"custom_total_overtime_qty",
-				],
-			],
-		],
-	},
-	{
 		"dt": "Custom HTML Block",
 		"filters": [["name", "in", ["Live Work Order", "Work Order"]]],
 	},
@@ -83,9 +61,6 @@ fixtures = [
 					"Work Order",
 					"live_production_api",
 					"fin_sight_dashboard_api",
-					# Overtime
-					"Get Overtime Report",
-					"Load Overtime Detail in Salary Slip (Child Table)",
 				],
 			]
 		],
@@ -97,8 +72,6 @@ fixtures = [
 				"name",
 				"in",
 				[
-					"Daily Overtime",
-					"Overtime",
 					"Packing Item List Invoice",
 					"Packing Items List",
 				],
@@ -152,7 +125,6 @@ doctype_js = {
 	"Sales Order": "public/js/sales_order.js",
 	"Work Order": "public/js/work_order.js",
 	"Job Card": "public/js/job_card.js",
-	"Salary Slip": "public/js/salary_slip.js",
 	"Packing Item List Invoice": "public/js/packing_item_list_invoice.js",
 	"Delivery Note": "public/js/delivery_note_packing_links.js",
 	"Purchase Order": "public/js/data_entry/purchase_order_data_entry.js",
